@@ -20,6 +20,7 @@ from dinov2.utils.config import setup
 from dinov2.utils.utils import CosineScheduler
 
 from dinov2.train.ssl_meta_arch import SSLMetaArch
+from dinov2.data.datasets.augmentation_rggb import create_adaptive_raw_pipeline
 
 
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.12 sets this to False by default
@@ -336,33 +337,26 @@ from torch.utils.tensorboard import SummaryWriter
 #     writer.close()
 #     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
+def get_state_dict(module, name):
+    """Helper function to safely get state_dict() from a module."""
+    if hasattr(module, "state_dict"):
+        return module.state_dict()
+    else:
+        logger.warning(f"{name} does not have state_dict() and will be skipped in checkpointing.")
+        return None
+
 def do_train(cfg, model, resume=False):
     from dinov2.data import SamplerType, make_data_loader, make_dataset
     from dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator
-    writer = SummaryWriter(log_dir="/home/paperspace/Documents/nika_space/dinov2/dinov2/tensorboard_logs/with_merged_blocks_small_lr")
+    writer = SummaryWriter(log_dir="/home/paperspace/Documents/nika_space/dinov2/dinov2/tensorboard_logs/main_dataset")
     model.train()
     inputs_dtype = torch.half
     fp16_scaler = model.fp16_scaler  # for mixed precision training
 
-    # # Freeze the original DINO weights
-    # for param in model.parameters():
-    #     param.requires_grad = False
-
-    # # Unfreeze the pre-encoder, model adapter, and merge blocks
-    # for param in model.pre_encoder.parameters():
-    #     param.requires_grad = True
-    # for param in model.model_adapter.parameters():
-    #     param.requires_grad = True
-    # for block in model.merge_blocks:
-    #     for param in block.parameters():
-    #         param.requires_grad = True
 
     # setup optimizer
     print("Cfg optim: ", cfg.optim)
     optimizer = build_optimizer(cfg, model.get_params_groups())
-    # optimizer = build_optimizer(cfg, [p for p in model.parameters() if p.requires_grad])
-    # trainable_params = [p for p in model.parameters() if p.requires_grad]
-    # optimizer = torch.optim.AdamW(trainable_params, lr=lr)
 
     (
         lr_schedule,
@@ -404,7 +398,13 @@ def do_train(cfg, model, resume=False):
         global_crops_size=cfg.crops.global_crops_size,
         local_crops_size=cfg.crops.local_crops_size,
     )
-
+    # data_transform = create_adaptive_raw_pipeline(
+    #     global_crops_size=cfg.crops.global_crops_size,
+    #     local_crops_size=cfg.crops.local_crops_size,
+    #     global_crops_scale=cfg.crops.global_crops_scale,
+    #     local_crops_scale=cfg.crops.local_crops_scale,
+    #     local_crops_number=cfg.crops.local_crops_number,
+    # )
     collate_fn = partial(
         collate_data_and_cast,
         mask_ratio_tuple=cfg.ibot.mask_ratio_min_max,

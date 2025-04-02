@@ -87,7 +87,7 @@ train:
   batch_size_per_gpu: 16 #vitg 26+, vitl: 56, vits:152, vitb:120 for 8 node
   num_workers: 1
   OFFICIAL_EPOCH_LENGTH: 500  # 1250
-  dataset_path: RAISE:root=/home/paperspace/Documents/nika_space/RAISE_383.csv
+  dataset_path: Main:root=/home/paperspace/Documents/nika_space/main_dataset/  #NPZ:root=/home/paperspace/Documents/nika_space/train_raws_subset/ #RAISE:root=/home/paperspace/Documents/nika_space/RAISE_383.csv
   #RAW_NOD:root=/home/paperspace/Documents/nika_space/raw_nod_dataset/RAW-NOD/image/ #ImageNet:root=/home/paperspace/Documents/nika_space/ADE20K/ADEChallengeData2016/images/training_raw/
   centering: sinkhorn_knopp
 
@@ -107,7 +107,7 @@ optim:
   layerwise_decay: 1.0
 
 evaluation:
-  eval_period_iterations: 50
+  eval_period_iterations: 500
 
 # adapt to model architecture
 # ---------------------------

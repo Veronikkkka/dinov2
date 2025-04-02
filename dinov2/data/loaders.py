@@ -13,8 +13,9 @@ from torch.utils.data import Sampler
 from .datasets import ImageNet, ImageNet22k
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 from .datasets import (
-    ADK20Dataset, RAWNODDataset, RaiseDataset
+    ADK20Dataset, RAWNODDataset, RaiseDataset, NPZDataset, UniformDataset
 )
+
 
 logger = logging.getLogger("dinov2")
 
@@ -64,6 +65,10 @@ def _parse_dataset_str(dataset_str: str):
         class_ = RAWNODDataset
     elif name == "RAISE":
         class_ = RaiseDataset
+    elif name == "NPZ":
+        class_ = NPZDataset
+    elif name == "Main":
+        class_ = UniformDataset
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 

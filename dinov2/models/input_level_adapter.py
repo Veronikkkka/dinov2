@@ -25,16 +25,16 @@ class Kernel_Predictor(nn.Module):
         self.q = nn.Parameter(torch.rand((1, 4, dim)), requires_grad=True)
 
         self.kv_downsample = nn.Sequential(
-            nn.Conv2d(3, dim // 8, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+            nn.Conv2d(4, dim // 8, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1)),
             nn.BatchNorm2d(dim // 8),
             nn.GELU(),
-            nn.Conv2d(dim // 8, dim // 4, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+            nn.Conv2d(dim // 8, dim // 4, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1)),
             nn.BatchNorm2d(dim // 4),
             nn.GELU(),
-            nn.Conv2d(dim // 4, dim // 2, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+            nn.Conv2d(dim // 4, dim // 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1)),
             nn.BatchNorm2d(dim // 2),
             nn.GELU(),
-            nn.Conv2d(dim // 2, dim, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+            nn.Conv2d(dim // 2, dim, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1)),
             nn.BatchNorm2d(dim),
         )
         self.k = nn.Linear(dim, dim, bias=qkv_bias)
@@ -91,18 +91,18 @@ class Matrix_Predictor(nn.Module):
         # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
         self.scale = qk_scale or head_dim ** -0.5
         # Query Adaptive Learning (QAL)
-        self.q = nn.Parameter(torch.rand((1, 9 + 1, dim)), requires_grad=True)
+        self.q = nn.Parameter(torch.rand((1, 16 + 1, dim)), requires_grad=True)
         self.kv_downsample = nn.Sequential(
-            nn.Conv2d(3, dim // 8, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+            nn.Conv2d(4, dim // 8, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1)),
             nn.BatchNorm2d(dim // 8),
             nn.GELU(),
-            nn.Conv2d(dim // 8, dim // 4, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+            nn.Conv2d(dim // 8, dim // 4, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1)),
             nn.BatchNorm2d(dim // 4),
             nn.GELU(),
-            nn.Conv2d(dim // 4, dim // 2, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+            nn.Conv2d(dim // 4, dim // 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1)),
             nn.BatchNorm2d(dim // 2),
             nn.GELU(),
-            nn.Conv2d(dim // 2, dim, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+            nn.Conv2d(dim // 2, dim, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1)),
             nn.BatchNorm2d(dim),
         )
         self.k = nn.Linear(dim, dim, bias=qkv_bias)
@@ -114,7 +114,7 @@ class Matrix_Predictor(nn.Module):
         self.down = nn.Linear(dim, 1)
         self.softmax = nn.Softmax(dim=2)
         self.relu = nn.ReLU()
-        self.ccm_base = nn.Parameter(torch.eye(3), requires_grad=False)
+        self.ccm_base = nn.Parameter(torch.eye(4), requires_grad=False)
 
     def forward(self, x):
         d_x = self.kv_downsample(x).flatten(2).transpose(1, 2)
@@ -127,12 +127,12 @@ class Matrix_Predictor(nn.Module):
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
-        out = (attn @ v).transpose(1, 2).reshape(B, 9 + 1, C)
+        out = (attn @ v).transpose(1, 2).reshape(B, 16 + 1, C)
         out = self.proj(out)
         out = self.proj_drop(out)
         out = self.down(out)
-        out, distance = out[:, :9, :], out[:, 9:, :].squeeze(-1)
-        out = out.view(B, 3, 3)
+        out, distance = out[:, :16, :], out[:, 16:, :].squeeze(-1)
+        out = out.view(B, 4, 4)
         # print(self.ccm_base)
         # print(out)
 
@@ -146,7 +146,7 @@ class NILUT(nn.Module):
     Simple residual coordinate-based neural network for fitting 3D LUTs
     Official code: https://github.com/mv-lab/nilut
     """
-    def __init__(self, in_features=3, hidden_features=32, hidden_layers=3, out_features=3, res=True):
+    def __init__(self, in_features=4, hidden_features=32, hidden_layers=3, out_features=4, res=True):
         super().__init__()
 
         self.res = res
@@ -259,23 +259,38 @@ def Gain_Denoise(I1, r1, r2, gain, sigma, k_size=3):  # [9, 9] in LOD dataset, [
     return torch.stack([out[i] for i in range(I1.shape[0])], dim=0)
 
 # Shades of Gray and Colour Constancy (Graham D. Finlayson, Elisabetta Trezzi)
+# def SoG_algo(img, p=1):
+#     # https://library.imaging.org/admin/apis/public/api/ist/website/downloadArticle/cic/12/1/art00008
+#     img = img.permute(1,2,0)       # (C,H,W) --> (H,W,C)
+
+#     img_P = torch.pow(img, p)
+
+#     R_avg = torch.mean(img_P[:,:,0]) ** (1/p)
+#     G_avg = torch.mean(img_P[:,:,1]) ** (1/p)
+#     B_avg = torch.mean(img_P[:,:,2]) ** (1/p)
+
+#     Avg = torch.mean(img_P) ** (1/p)
+
+#     R_avg = R_avg / Avg
+#     G_avg = G_avg / Avg
+#     B_avg = B_avg / Avg
+
+#     img_out = torch.stack([img[:,:,0]/R_avg, img[:,:,1]/G_avg, img[:,:,2]/B_avg], dim=-1)
+
+#     return img_out
+
 def SoG_algo(img, p=1):
-    # https://library.imaging.org/admin/apis/public/api/ist/website/downloadArticle/cic/12/1/art00008
-    img = img.permute(1,2,0)       # (C,H,W) --> (H,W,C)
-
+    img = img.permute(1,2,0)  # (C,H,W) --> (H,W,C)
+    
     img_P = torch.pow(img, p)
-
-    R_avg = torch.mean(img_P[:,:,0]) ** (1/p)
-    G_avg = torch.mean(img_P[:,:,1]) ** (1/p)
-    B_avg = torch.mean(img_P[:,:,2]) ** (1/p)
+    
+    # Now calculate the average for each channel
+    avg_channels = torch.mean(img_P, dim=(0, 1)) ** (1/p)  # Average for each channel
 
     Avg = torch.mean(img_P) ** (1/p)
 
-    R_avg = R_avg / Avg
-    G_avg = G_avg / Avg
-    B_avg = B_avg / Avg
-
-    img_out = torch.stack([img[:,:,0]/R_avg, img[:,:,1]/G_avg, img[:,:,2]/B_avg], dim=-1)
+    # Normalize each channel
+    img_out = torch.stack([img[:,:,i]/(avg_channels[i] / Avg) for i in range(img.shape[2])], dim=-1)
 
     return img_out
 

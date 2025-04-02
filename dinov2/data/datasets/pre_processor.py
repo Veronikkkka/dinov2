@@ -2,6 +2,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from PIL import Image
 
 class RAWDataPreProcessor:
     """Data pre-processor specifically for RGGB RAW images."""
@@ -19,8 +20,10 @@ class RAWDataPreProcessor:
     def process_tensor(self, tensor):
         """Process a single tensor with normalization."""
 
+        max_value = 16383 if tensor.max() > 1 else 1    # max for Nikon D700
+        white_level = max(self.white_level, max_value)
         if self.black_level is not None and self.white_level is not None:
-            tensor = (tensor - self.black_level) / (self.white_level - self.black_level)
+            tensor = (tensor - self.black_level) / (white_level - self.black_level)
 
             tensor = torch.clamp(tensor, 0, 1)
 
@@ -109,9 +112,35 @@ class UniformDataset(Dataset):
 
             for img_name in sorted(os.listdir(images_folder)):
                 img_path = os.path.join(images_folder, img_name)
-                label = label_dict.get(img_name, -1)
+                base_name = img_name.split(".npy")[0]
+                label = label_dict.get(base_name, -1)
 
                 self.data.append((img_path, label))
+            self.check_after_loading()
+
+    def check_after_loading(self):
+        import random
+        save_dir = "check_before_training"
+        os.makedirs(save_dir, exist_ok=True)
+
+        indices = random.sample(range(len(self.data)), min(10, len(self.data)))
+
+        for i, idx in enumerate(indices):
+            image_path, label = self.data[idx]
+            loaded_data = np.load(image_path, allow_pickle=True)
+            raw_image = loaded_data
+            raw_image = raw_image.astype(np.float32) 
+            
+            raw_tensor = torch.from_numpy(raw_image).float()
+            processed_dict = self.preprocessor({"image": raw_tensor})
+            visualization_image = processed_dict['image'][:3]
+            visualization_image = visualization_image.cpu().detach().numpy()
+            visualization_image = visualization_image.transpose(1, 2, 0)
+            visualization_image = (visualization_image * 255).clip(0, 255).astype(np.uint8)
+            img_save_path = os.path.join(save_dir, f"image_{i}.png")
+            Image.fromarray(visualization_image).save(img_save_path)
+
+        print(f"Saved {len(indices)} images to '{save_dir}'")
 
     def __len__(self):
         return len(self.data)
@@ -122,7 +151,7 @@ class UniformDataset(Dataset):
         try:
 
             loaded_data = np.load(img_path, allow_pickle=True)
-            
+            # print("Loaded ", loaded_data.shape, img_path)
             if isinstance(loaded_data, dict):
 
                 data_dict = loaded_data
@@ -145,6 +174,9 @@ class UniformDataset(Dataset):
 
 
             if isinstance(raw_image, np.ndarray):
+                if raw_image.dtype == np.uint16:
+                    # print(f"Converting dtype of {img_path} from uint16 to float32.")
+                    raw_image = raw_image.astype(np.float32) 
 
                 if len(raw_image.shape) == 3 and raw_image.shape[0] == 4:
                     # (4, H, W)
@@ -160,31 +192,57 @@ class UniformDataset(Dataset):
                         raw_tensor = raw_tensor.unsqueeze(0)
                 
                 data_dict['image'] = raw_tensor
+                
 
             elif torch.is_tensor(raw_image):
                 raw_tensor = raw_image.float()
+                # print("Raw tensor", raw_tensor)
                 data_dict['image'] = raw_tensor
-            
+                # print("Data dict", data_dict['image'])
 
-            print("data dict: ", data_dict.keys())
+            # print("Img path ", img_path, data_dict['image'])
             processed_dict = self.preprocessor(data_dict)
             
+            
             processed_image = processed_dict['image']
+            # print("Processed image: ", processed_image)
+            processed_image = processed_image.cpu().detach()
+            processed_image = processed_image.permute(1, 2, 0).numpy()
+
+            if processed_image.dtype != np.uint8:
+                processed_image = (processed_image * 255).astype(np.uint8)
+
+             # Assuming 'processed_image' is a NumPy array in RGGB format
+            processed_image = Image.fromarray(processed_image)
+
+            # # Explicit image check
+            # visualization_image = processed_dict['image'][:3]  # Extract RGB channels
+            # visualization_image = visualization_image.cpu().detach().numpy()
+            # visualization_image = visualization_image.transpose(1, 2, 0)
+            # visualization_image = (visualization_image * 255).clip(0, 255).astype(np.uint8)
+            # Image.fromarray(visualization_image).save("output_rgb.png")
 
             if self.transform:
                 image = self.transform(processed_image)
-            print("Image type: ", type(image), image.keys())
+
+            # visualization_image = image['global_crops'][0][:3]  # Extract RGB channels
+            # visualization_image = visualization_image.cpu().detach().numpy()
+            # visualization_image = visualization_image.transpose(1, 2, 0)
+            # visualization_image = (visualization_image * 255).clip(0, 255).astype(np.uint8)
+            # Image.fromarray(visualization_image).save("output_rgb_2.png")
+
             if self.target_transform and label is not None:
                 label = self.target_transform(label)
-                
+            # processed_image.save("output.png")  
+
             return image, label
             
         except (EOFError, ValueError, Exception) as e:
             print(f"Error loading file {img_path}: {str(e)}")
-            # Return a placeholder instead of failing
             placeholder = torch.zeros((4, 128, 128))
             return placeholder, label
 
+    
     def get_targets(self):
         """Returns a list of all labels in the dataset."""
         return [label for _, label in self.data]

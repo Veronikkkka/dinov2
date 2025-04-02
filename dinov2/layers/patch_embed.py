@@ -38,7 +38,7 @@ class PatchEmbed(nn.Module):
         self,
         img_size: Union[int, Tuple[int, int]] = 224,
         patch_size: Union[int, Tuple[int, int]] = 16,
-        in_chans: int = 3,
+        in_chans: int = 4,
         embed_dim: int = 768,
         norm_layer: Optional[Callable] = None,
         flatten_embedding: bool = True,
@@ -68,7 +68,13 @@ class PatchEmbed(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         _, _, H, W = x.shape
         patch_H, patch_W = self.patch_size
+        # print("H, w,m patch", H, W, patch_H, patch_W)
+        # print(f"Input size: {H}x{W}, Patch size: {patch_H}x{patch_W}")
+        # print(f"Patch grid resolution: {H // patch_H} x {W // patch_W} = {self.num_patches} patches")
 
+        # if(H%patch_H !=0 ):
+        #     H = H - H % patch_H
+        #     W = W - W % patch_W
         assert H % patch_H == 0, f"Input image height {H} is not a multiple of patch height {patch_H}"
         assert W % patch_W == 0, f"Input image width {W} is not a multiple of patch width: {patch_W}"
 

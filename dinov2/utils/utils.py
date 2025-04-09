@@ -34,9 +34,11 @@ def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
     # remove `backbone.` prefix induced by multicrop wrapper
     
     state_dict = {k.replace("teacher.backbone.", ""): v for k, v in state_dict.items()}
-    # print("Model Keys:")
-    # for key in state_dict.keys():
-    #     print(key)
+    print("Model Keys:")
+    for key in state_dict.keys():
+        # print(key)
+        if "pos_embed" in key:
+            print(key, state_dict[key])
     # print("State dict: ", state_dict.keys())
     msg = model.load_state_dict(state_dict, strict=False)
     logger.info("Pretrained weights found at {} and loaded with msg: {}".format(pretrained_weights, msg))

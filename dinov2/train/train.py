@@ -348,8 +348,9 @@ def get_state_dict(module, name):
 def do_train(cfg, model, resume=False):
     from dinov2.data import SamplerType, make_data_loader, make_dataset
     from dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator
-    writer = SummaryWriter(log_dir="/home/paperspace/Documents/nika_space/dinov2/dinov2/tensorboard_logs/main_dataset")
+    writer = SummaryWriter(log_dir="/home/paperspace/Documents/nika_space/dinov2/dinov2/tensorboard_logs/basic")
     model.train()
+    
     inputs_dtype = torch.half
     fp16_scaler = model.fp16_scaler  # for mixed precision training
 

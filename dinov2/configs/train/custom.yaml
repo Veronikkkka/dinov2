@@ -86,8 +86,8 @@ data_transform: "default"
 train:
   batch_size_per_gpu: 16 #vitg 26+, vitl: 56, vits:152, vitb:120 for 8 node
   num_workers: 1
-  OFFICIAL_EPOCH_LENGTH: 500  # 1250
-  dataset_path: Main:root=/home/paperspace/Documents/nika_space/main_dataset/  #NPZ:root=/home/paperspace/Documents/nika_space/train_raws_subset/ #RAISE:root=/home/paperspace/Documents/nika_space/RAISE_383.csv
+  OFFICIAL_EPOCH_LENGTH: 1000  # 1250
+  dataset_path: Main:root=/home/paperspace/Documents/nika_space/main_dataset/:split=train  #NPZ:root=/home/paperspace/Documents/nika_space/train_raws_subset/ #RAISE:root=/home/paperspace/Documents/nika_space/RAISE_383.csv
   #RAW_NOD:root=/home/paperspace/Documents/nika_space/raw_nod_dataset/RAW-NOD/image/ #ImageNet:root=/home/paperspace/Documents/nika_space/ADE20K/ADEChallengeData2016/images/training_raw/
   centering: sinkhorn_knopp
 
@@ -100,7 +100,7 @@ train:
 teacher:
   momentum_teacher: 0.994
 optim:
-  epochs: 50  # 500
+  epochs: 20  # 500
   weight_decay_end: 0.35
   base_lr: 0.0001  # learning rate for a batch size of 1024
   warmup_epochs: 20  # 80
@@ -117,7 +117,8 @@ evaluation:
 student:
   arch: dinov2_vitb14 #vit_base #dinov2_vitb14
   patch_size: 14
-  merge_block_indexes: "0, 6, 10"  # num, num, num,
+  merge_block_indexes: ""  # num, num, num,
+  pretrained_weights: "/home/paperspace/Documents/nika_space/dinov2_vitb14_reg4_pretrain.pth"
 crops:
   global_crops_scale:
   - 0.32 #0.32 default

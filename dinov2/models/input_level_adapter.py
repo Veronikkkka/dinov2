@@ -247,16 +247,200 @@ def gaussian_blur(img: Tensor, kernel_size: List[int], sigma: List[float]) -> Te
     img = _cast_squeeze_out(img, need_cast, need_squeeze, out_dtype)
     return img
 
-def Gain_Denoise(I1, r1, r2, gain, sigma, k_size=3):  # [9, 9] in LOD dataset, [3, 3] in other dataset
+def anisotropic_gaussian_blur(
+    img: Tensor, 
+    kernel_size: List[int], 
+    r1: Tensor, 
+    r2: Tensor, 
+    theta: float = 0.0
+) -> Tensor:
+    """
+    Apply anisotropic Gaussian blur to each channel of the input image
+    """
+    if not isinstance(img, torch.Tensor):
+        raise TypeError(f"img should be Tensor. Got {type(img)}")
+
+    _assert_image_tensor(img)
+    
+    B, C, H, W = img.shape
+    dtype = img.dtype if torch.is_floating_point(img) else torch.float32
+    
+    per_channel_kernels = (r1.ndim > 1 and r1.shape[1] == C)
+
+    padding = [kernel_size[0] // 2, kernel_size[0] // 2, kernel_size[1] // 2, kernel_size[1] // 2]
+    img_padded = torch_pad(img, padding, mode="reflect")    
+    img_padded = img_padded.to(dtype)
+    
+    # process each channel independently
+    if per_channel_kernels:
+        output = []
+        for c in range(C):
+            channel_r1 = r1[:, c]
+            channel_r2 = r2[:, c]
+            
+            kernel = _get_anisotropic_gaussian_kernel2d(
+                kernel_size, channel_r1, channel_r2, theta, dtype, img.device
+            )
+            
+            # (B, 1, kernel_h, kernel_w)
+            kernel = kernel.unsqueeze(1)
+            
+            # (B, 1, H+padding, W+padding)
+            channel = img_padded[:, c:c+1]
+            
+            channel_output = []
+            for b in range(B):
+
+                b_kernel = kernel[b:b+1]
+                b_channel = channel[b:b+1]                
+                b_output = conv2d(b_channel, b_kernel, groups=1)
+                channel_output.append(b_output)
+            
+            channel_output = torch.cat(channel_output, dim=0)
+            output.append(channel_output)
+        
+        # combine channels
+        output = torch.cat(output, dim=1)
+    else:
+        # same kernel for all channels
+        kernel = _get_anisotropic_gaussian_kernel2d(
+            kernel_size, r1, r2, theta, dtype, img.device
+        )
+        
+        output = []
+        for b in range(B):
+            # (C, 1, kernel_h, kernel_w)
+            b_kernel = kernel[b:b+1].expand(C, 1, kernel_size[0], kernel_size[1])
+            
+            # grouped conv
+            b_output = conv2d(img_padded[b:b+1], b_kernel, groups=C)
+            output.append(b_output)
+        
+        output = torch.cat(output, dim=0)
+    
+    if img.dtype != dtype:
+        output = output.to(img.dtype)
+    
+    return output
+
+def _get_anisotropic_gaussian_kernel2d(
+    kernel_size: List[int], r1: Tensor, r2: Tensor, theta: float = 0.0, 
+    dtype: torch.dtype = torch.float32, device: torch.device = None
+) -> Tensor:
+    """
+    Creates an anisotropic 2D Gaussian kernel
+    """
+    if device is None:
+        device = r1.device
+    
+    batch_size = r1.shape[0]
+    kernel_height, kernel_width = kernel_size
+    
+    # coordinate grid
+    x_grid = torch.linspace(-(kernel_width - 1) / 2, (kernel_width - 1) / 2, kernel_width, device=device)
+    y_grid = torch.linspace(-(kernel_height - 1) / 2, (kernel_height - 1) / 2, kernel_height, device=device)
+    y, x = torch.meshgrid(y_grid, x_grid, indexing='ij')
+    
+    # for batch processing
+    x = x.expand(batch_size, -1, -1)
+    y = y.expand(batch_size, -1, -1)
+    
+    # equation (3) in the paper
+    cos_theta = torch.cos(torch.tensor(theta, device=device))
+    sin_theta = torch.sin(torch.tensor(theta, device=device))
+    
+    # Calculate b0, b1, b2 coefficients with broadcasting for batch support
+    r1_squared = r1.view(batch_size, 1, 1).pow(2)
+    r2_squared = r2.view(batch_size, 1, 1).pow(2)
+    
+    b0 = (cos_theta.pow(2) / (2 * r1_squared)) + (sin_theta.pow(2) / (2 * r2_squared))
+    b1 = (torch.sin(2 * torch.tensor(theta, dtype=torch.float32)) / 4) * ((r1 / r2).pow(2) - 1) / r1_squared
+    b2 = (sin_theta.pow(2) / (2 * r1_squared)) + (cos_theta.pow(2) / (2 * r2_squared))
+    
+    # Compute kernel values using equation (2) from the paper
+    kernel = torch.exp(-(b0 * x.pow(2) + 2 * b1 * x * y + b2 * y.pow(2)))
+    
+    # Normalize the kernel
+    kernel = kernel / kernel.sum(dim=(1, 2), keepdim=True)
+    
+    return kernel.to(dtype=dtype)
+
+# def Gain_Denoise(I1, r1, r2, gain, sigma, k_size=3):  # [9, 9] in LOD dataset, [3, 3] in other dataset
+#     out = []
+#     for i in range(I1.shape[0]):
+#         I1_gain = gain[i] * I1[i,:,:,:]
+#         # blur = gaussian_blur(I1_gain, \
+#         #                         [k_size, k_size], \
+#         #                         [r1[i], r2[i]])
+#         blur = anisotropic_gaussian_blur(I1_gain, \
+#                                 [k_size, k_size], \
+#                                 [r1[i], r2[i]])
+#         sharp = blur + sigma[i] * (I1[i,:,:,:] - blur)
+#         out.append(sharp)
+#     return torch.stack([out[i] for i in range(I1.shape[0])], dim=0)
+
+def Gain_Denoise(I1, r1, r2, gain, sigma, k_size=3):
+    """
+    Apply gain adjustment and anisotropic Gaussian denoising to RGGB raw images.
+    
+    Args:
+        I1: Input RGGB raw image of shape (B, 4, H, W)
+        r1: Major axis radius of shape (B,) or (B, 4) for channel-specific parameters
+        r2: Minor axis radius of shape (B,) or (B, 4) for channel-specific parameters
+        gain: Gain factor of shape (B,) or (B, 4) for channel-specific gains
+        sigma: Filter parameter for detail preservation of shape (B,)
+        k_size: Kernel size for Gaussian blur
+    
+    Returns:
+        Processed image of same shape as input
+    """
+    B, C, H, W = I1.shape
+    
+    # Check if we have channel-specific parameters
+    channel_specific = False
+    if isinstance(gain, torch.Tensor) and gain.ndim > 1:
+        channel_specific = True
+    
+    # Process each batch sample
     out = []
-    for i in range(I1.shape[0]):
-        I1_gain = gain[i] * I1[i,:,:,:]
-        blur = gaussian_blur(I1_gain, \
-                                [k_size, k_size], \
-                                [r1[i], r2[i]])
-        sharp = blur + sigma[i] * (I1[i,:,:,:] - blur)
+    for i in range(B):
+        # Apply gain adjustment
+        if channel_specific:
+            # Apply channel-specific gains
+            gain_factor = gain[i].view(C, 1, 1)  # Shape: [4, 1, 1]
+            I1_gain = I1[i] * gain_factor
+        else:
+            # Apply same gain to all channels
+            I1_gain = gain[i] * I1[i]
+        
+        # Apply anisotropic Gaussian blur for denoising
+        if channel_specific:
+            # Get channel-specific r1 and r2 parameters
+            sample_r1 = r1[i].unsqueeze(0)  # Shape: [1, 4]
+            sample_r2 = r2[i].unsqueeze(0)  # Shape: [1, 4]
+        else:
+            # Use the same r1 and r2 for all channels
+            sample_r1 = r1[i].unsqueeze(0)  # Shape: [1]
+            sample_r2 = r2[i].unsqueeze(0)  # Shape: [1]
+        
+        # Add batch dimension back for the blur function
+        I1_gain_with_batch = I1_gain.unsqueeze(0)  # Shape: [1, 4, H, W]
+        
+        # Apply anisotropic blur
+        blur = anisotropic_gaussian_blur(
+            I1_gain_with_batch,
+            [k_size, k_size],
+            sample_r1,
+            sample_r2
+        ).squeeze(0)  # Remove batch dim, result shape: [4, H, W]
+        
+        # Detail preservation with sigma parameter
+        sigma_i = sigma[i]
+        sharp = blur + sigma_i * (I1[i] - blur)
+        
         out.append(sharp)
-    return torch.stack([out[i] for i in range(I1.shape[0])], dim=0)
+    
+    return torch.stack(out, dim=0)
 
 # Shades of Gray and Colour Constancy (Graham D. Finlayson, Elisabetta Trezzi)
 # def SoG_algo(img, p=1):

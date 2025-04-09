@@ -48,7 +48,7 @@ class DinoVisionTransformer(nn.Module):
         self,
         img_size=224,
         patch_size=16,
-        in_chans=3,
+        in_chans=4,
         embed_dim=768,
         depth=12,
         num_heads=12,
@@ -199,16 +199,16 @@ class DinoVisionTransformer(nn.Module):
             for param in self.pre_encoder.parameters():
                 param.requires_grad_(True)            
 
-            self.model_adapter = Model_level_Adapeter(in_c=in_chans, w_lut=w_lut)
-            self.model_adapter = Model_level_Adapeter(in_c=3, in_dim=ada_c_s[0], w_lut=self.w_lut)
-            if model_adapter_path is not None:
-                print("Loading model adapter:", model_adapter_path)
-                adapter_state = torch.load(model_adapter_path, map_location="cpu")
-                self.model_adapter.load_state_dict(adapter_state, strict=False)
-            if input_level_adapter_path is not None:
-                print("Loading input-level adapter:", input_level_adapter_path)
-                adapter_state = torch.load(input_level_adapter_path, map_location="cpu")
-                self.pre_encoder.load_state_dict(adapter_state)
+            # self.model_adapter = Model_level_Adapeter(in_c=in_chans, w_lut=w_lut)
+            self.model_adapter = Model_level_Adapeter(in_c=4, in_dim=ada_c_s[0], w_lut=self.w_lut)
+            # if model_adapter_path is not None:
+            #     print("Loading model adapter:", model_adapter_path)
+            #     adapter_state = torch.load(model_adapter_path, map_location="cpu")
+            #     self.model_adapter.load_state_dict(adapter_state, strict=False)
+            # if input_level_adapter_path is not None:
+            #     print("Loading input-level adapter:", input_level_adapter_path)
+            #     adapter_state = torch.load(input_level_adapter_path, map_location="cpu")
+            #     self.pre_encoder.load_state_dict(adapter_state)
 
             self.merge_blocks = []
             
@@ -278,7 +278,7 @@ class DinoVisionTransformer(nn.Module):
                 param.requires_grad = True  # Ensure adapters are trainable
 
     def init_weights(self):
-        trunc_normal_(self.pos_embed, std=0.02)
+        trunc_normal_(self.pos_embed, std=0.02)        
         nn.init.normal_(self.cls_token, std=1e-6)
         if self.register_tokens is not None:
             nn.init.normal_(self.register_tokens, std=1e-6)
@@ -359,11 +359,10 @@ class DinoVisionTransformer(nn.Module):
 
         x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
         ada = torch.cat((self.cls_token.expand(ada.shape[0], -1, -1), ada), dim=1)
+        # print("pos_embed shape11:", self.pos_embed.shape)
         ada = ada + self.interpolate_pos_encoding(ada, w, h)
 
         x = x + self.interpolate_pos_encoding(x, w, h)
-
-
 
         if self.register_tokens is not None:
             x = torch.cat(
@@ -496,6 +495,7 @@ class DinoVisionTransformer(nn.Module):
         return tuple(outputs)
 
     def forward(self, *args, is_training=False, **kwargs):
+        # print("pos_embed shape _ 0:", self.pos_embed.shape)
         ret = self.forward_features(*args, **kwargs)
         if is_training:
             return ret

@@ -3,6 +3,9 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from PIL import Image
+from torchvision import transforms
+import torchvision.transforms.functional as TF
+
 
 class RAWDataPreProcessor:
     """Data pre-processor specifically for RGGB RAW images."""
@@ -51,7 +54,7 @@ class RAWDataPreProcessor:
 
 
 class UniformDataset(Dataset):
-    def __init__(self, root, transform=None, target_transform=None, 
+    def __init__(self, root, transform=None, target_transform=None, split="train",
                  mean=None, std=None, black_level=0, white_level=1.0):
         """
         Args:
@@ -64,6 +67,7 @@ class UniformDataset(Dataset):
             white_level (int/float): White level for RAW image normalization.
         """
         self.root = root
+        self.split = split
         self.transform = transform
         self.target_transform = target_transform
         
@@ -81,45 +85,51 @@ class UniformDataset(Dataset):
     def _load_dataset(self):
         """Loads image paths and labels, mapping text labels to numbers."""
         label_idx = 0
+        split_root = os.path.join(self.root, self.split)
 
-        for subfolder in sorted(os.listdir(self.root)):  
-            subfolder_path = os.path.join(self.root, subfolder)
+        label_dict = {}
+        labels_file = os.path.join(self.root, "labels.txt")
+        if os.path.exists(labels_file):
+            with open(labels_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.strip().split(" ")
+                    if len(parts) < 2:
+                        continue
+                    filename, *label_text = parts
+                    label_text = " ".join(label_text)
+                    if label_text not in self.label_map:
+                        self.label_map[label_text] = label_idx
+                        label_idx += 1
+                    label_dict[filename] = self.label_map[label_text]
+
+        # print("Label dict ", label_dict)
+        for subfolder in sorted(os.listdir(split_root)):  
+            # if subfolder != "raise":
+            #     continue
+            subfolder_path = os.path.join(split_root, subfolder)
             images_folder = os.path.join(subfolder_path, "images")
-            labels_file = os.path.join(subfolder_path, "labels.txt")
+            
 
             if not os.path.isdir(images_folder):
                 continue
 
-            label_dict = {}
-
-            if os.path.exists(labels_file):
-                with open(labels_file, "r", encoding="utf-8") as f:
-                    for line in f:
-                        parts = line.strip().split(" ")
-                        if len(parts) < 2:
-                            continue
-
-                        filename, *label_text = parts
-                        label_text = " ".join(label_text)
-
-
-                        if label_text not in self.label_map:
-                            self.label_map[label_text] = label_idx
-                            label_idx += 1
-
-                        label_dict[filename] = self.label_map[label_text]
 
 
             for img_name in sorted(os.listdir(images_folder)):
                 img_path = os.path.join(images_folder, img_name)
                 base_name = img_name.split(".npy")[0]
                 label = label_dict.get(base_name, -1)
-
+                # if label == -1:
+                #     import time
+                #     time.sleep(2)
                 self.data.append((img_path, label))
-            self.check_after_loading()
+        self.check_after_loading()
+
 
     def check_after_loading(self):
-        import random
+        import random, time
+        random.seed(time.time()) 
+        print("Time: ", time.time())
         save_dir = "check_before_training"
         os.makedirs(save_dir, exist_ok=True)
 
@@ -133,6 +143,7 @@ class UniformDataset(Dataset):
             
             raw_tensor = torch.from_numpy(raw_image).float()
             processed_dict = self.preprocessor({"image": raw_tensor})
+            # processed_dict = {"image": raw_tensor}
             visualization_image = processed_dict['image'][:3]
             visualization_image = visualization_image.cpu().detach().numpy()
             visualization_image = visualization_image.transpose(1, 2, 0)
@@ -205,25 +216,54 @@ class UniformDataset(Dataset):
             
             
             processed_image = processed_dict['image']
+            # processed_image = data_dict['image']
             # print("Processed image: ", processed_image)
             processed_image = processed_image.cpu().detach()
-            processed_image = processed_image.permute(1, 2, 0).numpy()
+            # processed_image = processed_image.permute(1, 2, 0).numpy()
 
-            if processed_image.dtype != np.uint8:
-                processed_image = (processed_image * 255).astype(np.uint8)
+            # if processed_image.dtype != np.uint8:
+            #     processed_image = (processed_image * 255).astype(np.uint8)
 
              # Assuming 'processed_image' is a NumPy array in RGGB format
-            processed_image = Image.fromarray(processed_image)
+            # tensor = torch.from_numpy(processed_image).float() 
+            # tensor = tensor / tensor.max()
 
-            # # Explicit image check
+            # self.visualize_rggb_image(processed_image.permute(1, 2, 0), "original_raw.png")
+            # print("Before: ", processed_image)
+            # processed_image = Image.fromarray(processed_image)
+            # print("After: ", processed_image)
+
+            # Explicit image check
             # visualization_image = processed_dict['image'][:3]  # Extract RGB channels
             # visualization_image = visualization_image.cpu().detach().numpy()
             # visualization_image = visualization_image.transpose(1, 2, 0)
             # visualization_image = (visualization_image * 255).clip(0, 255).astype(np.uint8)
             # Image.fromarray(visualization_image).save("output_rgb.png")
 
+            # resize_transform = transforms.Resize((224, 224))
+            # processed_image = resize_transform(processed_image)
+
+            # if tensor.shape[-1] == 4:  # [H, W, 4]
+            #     tensor = tensor.permute(2, 0, 1)  # → [4, H, W]
+            # #     self.visualize_rggb_image(tensor.permute(1, 2, 0), "tensor_1.png")
+
+            # resized_tensor = TF.resize(tensor, size=(224, 224), interpolation=TF.InterpolationMode.BILINEAR)
+            
             if self.transform:
                 image = self.transform(processed_image)
+                # image = self.transform(resized_tensor)
+            else:
+                # print("Self transform")
+                image = transforms.ToTensor()(processed_image) 
+            
+            # print("Image: ", type(image))
+            if type(image) != torch.Tensor:
+                self.visualize_rggb_image(image['global_crops'][0].permute(1, 2, 0), "global_crop1.png")
+            else:
+                self.visualize_rggb_image(image.permute(1, 2, 0), "global_crop1.png")
+            # self.visualize_rggb_image(image['global_crops'][1], "global_crop2.png")
+                # print(f"Image shape: {image.shape}")
+
 
             # visualization_image = image['global_crops'][0][:3]  # Extract RGB channels
             # visualization_image = visualization_image.cpu().detach().numpy()
@@ -235,14 +275,66 @@ class UniformDataset(Dataset):
                 label = self.target_transform(label)
             # processed_image.save("output.png")  
 
+
+
             return image, label
             
         except (EOFError, ValueError, Exception) as e:
             print(f"Error loading file {img_path}: {str(e)}")
-            placeholder = torch.zeros((4, 128, 128))
+            placeholder = torch.zeros((4, 224, 224))
             return placeholder, label
 
     
     def get_targets(self):
         """Returns a list of all labels in the dataset."""
-        return [label for _, label in self.data]
+        return np.array([label for _, label in self.data])
+    
+    def visualize_rggb_image(self, tensor, output_path="visualized_image.png"):
+        """
+        Properly visualize a raw image tensor with shape [H, W, 4] where the last dimension is RGGB
+        
+        Args:
+            tensor: Raw tensor with shape [H, W, 4]
+            output_path: Path to save the visualization
+        """
+        # Make sure tensor is on CPU
+        if isinstance(tensor, torch.Tensor):
+            if tensor.device.type != 'cpu':
+                tensor = tensor.cpu()
+            tensor_np = tensor.numpy()
+        else:
+            tensor_np = tensor
+        
+        # Extract RGGB channels
+        r = tensor_np[:, :, 0]
+        g1 = tensor_np[:, :, 1]
+        g2 = tensor_np[:, :, 2]
+        b = tensor_np[:, :, 3]
+        
+        # Average the two green channels
+        g = (g1 + g2) / 2
+        
+        # Create RGB array
+        rgb = np.stack([r, g, b], axis=2)
+        
+        # Robust normalization using percentiles
+        def robust_normalize(arr):
+            lower = np.percentile(arr, 2)  # 2nd percentile
+            upper = np.percentile(arr, 98)  # 98th percentile
+            
+            # Prevent division by zero
+            if upper == lower:
+                return np.zeros_like(arr)
+            
+            # Clip and normalize
+            arr_clipped = np.clip(arr, lower, upper)
+            arr_norm = (arr_clipped - lower) / (upper - lower)
+            return np.clip(arr_norm * 255, 0, 255).astype(np.uint8)
+        
+        # Apply robust normalization
+        rgb_normalized = robust_normalize(rgb)
+        
+        # Save image
+        Image.fromarray(rgb_normalized).save(output_path)
+        
+        return rgb_normalized

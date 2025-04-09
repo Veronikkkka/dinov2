@@ -52,12 +52,12 @@ def get_downloaded_dino_vit_interpolated(modelname="dinov2_vits14", merge_block_
     print("HERE !")
     model = torch.hub.load("facebookresearch/dinov2", modelname, pretrained=False, merge_block_indexes=merge_block_indexes, is_teacher=is_teacher)  #
     print("HERE 2")
-    input_tensor = model.pos_embed
-    input_tensor = input_tensor.to('cuda') 
-    tensor_corr_shape = interpolate_pos_encoding(input_tensor, 16, 16)
-    pos_embed = nn.Parameter(torch.zeros(1, 257))
-    pos_embed.data = tensor_corr_shape
-    model.pos_embed = pos_embed
+    # input_tensor = model.pos_embed
+    # input_tensor = input_tensor.to('cuda') 
+    # tensor_corr_shape = interpolate_pos_encoding(input_tensor, 16, 16)
+    # pos_embed = nn.Parameter(torch.zeros(1, 257))
+    # model.pos_embed.data = tensor_corr_shape
+    # model.pos_embed = pos_embed
     return model
 
 
@@ -84,8 +84,9 @@ class SSLMetaArch(nn.Module):
 
         if cfg.student.pretrained_weights:
             chkpt = torch.load(cfg.student.pretrained_weights)
+            # print(chkpt.keys())
             logger.info(f"OPTIONS -- pretrained weights: loading from {cfg.student.pretrained_weights}")
-            student_backbone.load_state_dict(chkpt["model"], strict=False)
+            student_backbone.load_state_dict(chkpt, strict=False)
 
         print("Before IF")
         if cfg.student.merge_block_indexes:

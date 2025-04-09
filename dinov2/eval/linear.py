@@ -133,14 +133,14 @@ def get_args_parser(
         help="Path to a file containing a mapping to adjust classifier outputs",
     )
     parser.set_defaults(
-        train_dataset_str="ImageNet:split=TRAIN",
-        val_dataset_str="ImageNet:split=VAL",
+        train_dataset_str="Main:root=/home/paperspace/Documents/nika_space/main_dataset/:split=train",
+        val_dataset_str="Main:root=/home/paperspace/Documents/nika_space/main_dataset/:split=val",
         test_dataset_strs=None,
-        epochs=10,
+        epochs=3,
         batch_size=128,
         num_workers=8,
-        epoch_length=1250,
-        save_checkpoint_frequency=20,
+        epoch_length=1,
+        save_checkpoint_frequency=1,
         eval_period_iterations=1250,
         learning_rates=[1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1],
         val_metric_type=MetricType.MEAN_ACCURACY,
@@ -352,6 +352,13 @@ def eval_linear(
         features = feature_model(data)
         outputs = linear_classifiers(features)
 
+        # for k, v in outputs.items():
+        #     num_classes = v.shape[1]
+        #     if (labels < 0).any() or (labels >= num_classes).any():
+        #         print(f"🚨 ERROR: Label out of bounds for classifier '{k}'")
+        #         print(f"Min label: {labels.min().item()}  Max label: {labels.max().item()}  Expected < {num_classes}")
+        #         raise ValueError("Invalid label detected.")
+
         losses = {f"loss_{k}": nn.CrossEntropyLoss()(v, labels) for k, v in outputs.items()}
         loss = sum(losses.values())
 
@@ -496,7 +503,10 @@ def run_eval_linear(
         dataset_str=train_dataset_str,
         transform=train_transform,
     )
-    training_num_classes = len(torch.unique(torch.Tensor(train_dataset.get_targets().astype(int))))
+    print(train_dataset.get_targets())
+    #training_num_classes = len(torch.unique(torch.Tensor(train_dataset.get_targets().astype(int))))
+    training_num_classes = int(torch.max(torch.tensor(train_dataset.get_targets())).item()) + 1
+    print(training_num_classes)
     sampler_type = SamplerType.SHARDED_INFINITE
     # sampler_type = SamplerType.INFINITE
 

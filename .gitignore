@@ -9,3 +9,4 @@ dist/
 *.swp
 
 .vscode/
+dinov2/eval/model_0001499.rank_0.pth

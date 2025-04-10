@@ -85,8 +85,8 @@ def get_args_parser(
         help="Number of tries",
     )
     parser.set_defaults(
-        train_dataset_str="ImageNet:split=TRAIN",
-        val_dataset_str="ImageNet:split=VAL",
+        train_dataset_str="Main:root=/home/paperspace/Documents/nika_space/main_dataset/",
+        val_dataset_str="Main:root=/home/paperspace/Documents/nika_space/main_dataset/",
         nb_knn=[10, 20, 100, 200],
         temperature=0.07,
         batch_size=256,
@@ -318,8 +318,8 @@ def eval_knn(
 def eval_knn_with_model(
     model,
     output_dir,
-    train_dataset_str="ImageNet:split=TRAIN",
-    val_dataset_str="ImageNet:split=VAL",
+    train_dataset_str="Main:root=/home/paperspace/Documents/nika_space/main_dataset/",
+    val_dataset_str="Main:root=/home/paperspace/Documents/nika_space/main_dataset/",
     nb_knn=(10, 20, 100, 200),
     temperature=0.07,
     autocast_dtype=torch.float,

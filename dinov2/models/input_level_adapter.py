@@ -146,7 +146,7 @@ class NILUT(nn.Module):
     Simple residual coordinate-based neural network for fitting 3D LUTs
     Official code: https://github.com/mv-lab/nilut
     """
-    def __init__(self, in_features=4, hidden_features=32, hidden_layers=3, out_features=4, res=True):
+    def __init__(self, in_features=3, hidden_features=32, hidden_layers=3, out_features=3, res=True):
         super().__init__()
 
         self.res = res
@@ -478,22 +478,53 @@ def SoG_algo(img, p=1):
 
     return img_out
 
-def WB_CCM(I2, ccm_matrix, distance):
-    out_I3 = []
-    out_I4 = []
-    for i in range(I2.shape[0]):
-        # SOG White Balance Algorithm
-        I3 = SoG_algo(I2[i,:,:,:], distance[i])
+# def WB_CCM(I2, ccm_matrix, distance):
+#     out_I3 = []
+#     out_I4 = []
+#     for i in range(I2.shape[0]):
+#         # SOG White Balance Algorithm
+#         I3 = SoG_algo(I2[i,:,:,:], distance[i])
 
-        # Camera Color Matrix
-        I4 = torch.tensordot(I3, ccm_matrix[i,:,:], dims=[[-1], [-1]])
-        I4 = torch.clamp(I4, 1e-5, 1.0)
+#         # Camera Color Matrix
+#         I4 = torch.tensordot(I3, ccm_matrix[i,:,:], dims=[[-1], [-1]])
+#         I4 = torch.clamp(I4, 1e-5, 1.0)
 
-        out_I3.append(I3)
-        out_I4.append(I4)
+#         out_I3.append(I3)
+#         out_I4.append(I4)
 
-    return  torch.stack([out_I3[i] for i in range(I2.shape[0])], dim=0), \
-            torch.stack([out_I4[i] for i in range(I2.shape[0])], dim=0)
+#     return  torch.stack([out_I3[i] for i in range(I2.shape[0])], dim=0), \
+#             torch.stack([out_I4[i] for i in range(I2.shape[0])], dim=0)
+
+class WB_CCM_Adapter(nn.Module):
+    def __init__(self):
+        super(WB_CCM_Adapter, self).__init__()
+        # Linear transformation from 4 channels to 3 channels
+        self.channel_reduction = nn.Conv2d(4, 3, kernel_size=1)
+
+    def forward(self, I2, ccm_matrix, distance):
+        out_I3 = []
+        out_I4 = []
+        for i in range(I2.shape[0]):
+            # SOG White Balance Algorithm
+            I3 = SoG_algo(I2[i,:,:,:], distance[i])
+
+            # Camera Color Matrix
+            I4 = torch.tensordot(I3, ccm_matrix[i,:,:], dims=[[-1], [-1]])
+            I4 = torch.clamp(I4, 1e-5, 1.0)
+
+            # Change the input shape to [B, C, H, W] format
+            # I4 = I4.permute(0, 3, 1, 2)  # From [B, H, W, C] to [B, C, H, W]
+
+            # Apply the learned channel reduction
+            # I4 = self.channel_reduction(I4)
+
+            out_I3.append(I3)
+            out_I4.append(I4)
+
+        return  torch.stack([out_I3[i] for i in range(I2.shape[0])], dim=0), \
+                torch.stack([out_I4[i] for i in range(I2.shape[0])], dim=0)
+
+
 
 class Input_level_Adapeter(nn.Module):
     def __init__(self, mode='normal', lut_dim=32, out='all', k_size=3, w_lut=True):
@@ -513,6 +544,8 @@ class Input_level_Adapeter(nn.Module):
             self.LUT = NILUT(hidden_features=lut_dim)
         self.out = out
         self.k_size = k_size
+        self.WB_CCM = WB_CCM_Adapter()
+        self.channel_reduction = nn.Conv2d(4, 3, kernel_size=1)
 
 
 
@@ -526,11 +559,19 @@ class Input_level_Adapeter(nn.Module):
 
         # (2). I2 --> I3: White Balance, Shade of Gray
         # (3). I3 --> I4: Camera Colour Matrix Transformation
-        I3, I4 = WB_CCM(I2, ccm_matrix, distance) # (B,H,W,C)
+        I3, I4 = self.WB_CCM(I2, ccm_matrix, distance) # (B,H,W,C)
+        
 
         if self.w_lut:
         # (4). I4 --> I5: Implicit Neural LUT
-            I5 = self.LUT(I4).permute(0,3,1,2)
+            I4_reduced = self.channel_reduction(I4.permute(0,3,1,2))  # Convert to [B,C,H,W] and reduce to 3 channels
+            I5 = self.LUT(I4_reduced.permute(0,2,3,1))  # Convert back to [B,H,W,C] for LUT
+            I5 = I5.permute(0,3,1,2) 
+            # I5 = self.LUT(I4).permute(0,3,1,2)
+
+            # # I5 = I5.permute(2, 0, 1).unsqueeze(0)  # [H, W, C] → [1, C, H, W]
+            # I5 = self.channel_reduction(I5)        # [1, 3, H, W]
+            # # I5 = I5.squeeze(0).permute(1, 2, 0)    # [1, 3, H, W] → [H, W, 3]
 
             if self.out == 'all':   # return all features
                 return [I1, I2, I3.permute(0,3,1,2), I4.permute(0,3,1,2), I5]

@@ -102,12 +102,12 @@ teacher:
 optim:
   epochs: 20  # 500
   weight_decay_end: 0.35
-  base_lr: 0.0001  # learning rate for a batch size of 1024
-  warmup_epochs: 20  # 80
+  base_lr: 0.00003  # learning rate for a batch size of 1024
+  warmup_epochs: 2  # 80
   layerwise_decay: 1.0
 
 evaluation:
-  eval_period_iterations: 500
+  eval_period_iterations: 1000
 
 # adapt to model architecture
 # ---------------------------
@@ -117,7 +117,7 @@ evaluation:
 student:
   arch: dinov2_vitb14 #vit_base #dinov2_vitb14
   patch_size: 14
-  merge_block_indexes: ""  # num, num, num,
+  merge_block_indexes: "0, 6, 10"  # num, num, num,
   pretrained_weights: "/home/paperspace/Documents/nika_space/dinov2_vitb14_reg4_pretrain.pth"
 crops:
   global_crops_scale:

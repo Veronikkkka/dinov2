@@ -348,7 +348,7 @@ def get_state_dict(module, name):
 def do_train(cfg, model, resume=False):
     from dinov2.data import SamplerType, make_data_loader, make_dataset
     from dinov2.data import collate_data_and_cast, DataAugmentationDINO, MaskingGenerator
-    writer = SummaryWriter(log_dir="/home/paperspace/Documents/nika_space/dinov2/dinov2/tensorboard_logs/basic")
+    writer = SummaryWriter(log_dir="/home/paperspace/Documents/nika_space/dinov2/dinov2/tensorboard_logs/six_merge_blocks")
     model.train()
     
     inputs_dtype = torch.half
@@ -445,6 +445,30 @@ def do_train(cfg, model, resume=False):
     metric_logger = MetricLogger(delimiter="  ", output_file=metrics_file)
     header = "Training"
     warmup_iterations = cfg.optim.warmup_epochs * OFFICIAL_EPOCH_LENGTH
+    print("Warmup iter: ", warmup_iterations)
+    # freeze dino
+    # for name, param in model.named_parameters():
+    #     if any(x in name for x in ["pre_encoder", "merge_block", "model_adapter"]):
+    #         print("Grad for ", name)
+    #         param.requires_grad = True 
+    #     else:
+    #         param.requires_grad = False  # Freeze original DINO
+
+    # to_unfreeze = []
+    # for name, param in model.named_parameters():
+    #     if param.requires_grad:
+    #         if any(x in name for x in ["pre_encoder", "merge_block", "model_adapter"]):
+    #             continue
+    #         else:
+    #             param.requires_grad = False
+    #             to_unfreeze.append(param)
+    #         # if param.requires_grad:
+    #     # print(name, param.requires_grad,  end=", ")
+
+    for name, param in model.named_parameters():
+        # if any(x in name for x in ["merge_block"]):
+        if param.requires_grad:
+            print(name, param.requires_grad,  end=", ")
 
     for data in metric_logger.log_every(
         data_loader,
@@ -456,11 +480,16 @@ def do_train(cfg, model, resume=False):
         current_batch_size = data["collated_global_crops"].shape[0] / 2
         if iteration > max_iter:
             return
-
+        # print("ITERATION ", iteration)
         # Unfreeze original DINO weights after warmup
-        if iteration == warmup_iterations:
-            for param in model.parameters():
-                param.requires_grad = True
+        # if iteration == 5000:
+        #     print(f"[INFO] Unfreezing all DINO weights at iteration {iteration}")
+        #     for param in to_unfreeze:
+        #         param.requires_grad = True
+        #     for name, param in model.named_parameters():
+        #         # if any(x in name for x in ["merge_block"]):
+        #         if param.requires_grad:
+        #             print(name, param.requires_grad,  end=", ")
 
    
         # apply schedules

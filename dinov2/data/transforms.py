@@ -39,8 +39,8 @@ class MaybeToTensor(transforms.ToTensor):
 
 
 # Use timm's names
-IMAGENET_DEFAULT_MEAN = (0.0446893610060215, 0.11062706261873245, 0.11063370108604431, 0.06802941858768463)#(0.485, 0.456, 0.406)
-IMAGENET_DEFAULT_STD =  (0.0667753592133522, 0.12049347162246704, 0.12050503492355347, 0.07335837930440903) #(0.229, 0.224, 0.225)
+IMAGENET_DEFAULT_MEAN = (0.0446893610060215, 0.11062706261873245, 0.11063370108604431, 0.06802941858768463)  #(0.485, 0.456, 0.406) #
+IMAGENET_DEFAULT_STD = (0.0667753592133522, 0.12049347162246704, 0.12050503492355347, 0.07335837930440903) #(0.229, 0.224, 0.225) #
 
 
 def make_normalize_transform(
@@ -80,7 +80,7 @@ def make_classification_train_transform(
 def make_classification_eval_transform(
     *,
     resize_size: int = 256,
-    interpolation=transforms.InterpolationMode.BICUBIC,
+    interpolation=transforms.InterpolationMode.BILINEAR,
     crop_size: int = 224,
     mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
     std: Sequence[float] = IMAGENET_DEFAULT_STD,
@@ -89,7 +89,7 @@ def make_classification_eval_transform(
         transforms.Resize(resize_size, interpolation=interpolation),
         transforms.CenterCrop(crop_size),
         MaybeToTensor(),
-        make_normalize_transform(mean=mean, std=std),
+        # make_normalize_transform(mean=mean, std=std),
     ]
     return transforms.Compose(transforms_list)
 
@@ -110,20 +110,20 @@ def make_classification_eval_transform(
 #     return transforms.Compose(transforms_list)
 
 
-class ToTensor4Channels(object):
-    def __call__(self, sample):
-        # Assumes input is [4, H, W] - a tensor with 4 channels
-        if isinstance(sample, torch.Tensor):
-            # You can permute the tensor to [H, W, 4] for standard image processing
-            sample = sample.permute(1, 2, 0)  # Convert from [4, H, W] to [H, W, 4]
+# class ToTensor4Channels(object):
+#     def __call__(self, sample):
+#         # Assumes input is [4, H, W] - a tensor with 4 channels
+#         if isinstance(sample, torch.Tensor):
+#             # You can permute the tensor to [H, W, 4] for standard image processing
+#             sample = sample.permute(1, 2, 0)  # Convert from [4, H, W] to [H, W, 4]
             
-            # Normalize to [0, 1] range (you can also do min-max normalization if required)
-            sample = sample.float() / 255.0
+#             # Normalize to [0, 1] range (you can also do min-max normalization if required)
+#             sample = sample.float() / 255.0
             
-            # Now sample is a [H, W, 4] tensor; you may apply further processing for RGGB, etc.
-            return torch.tensor(sample, dtype=torch.float32)
+#             # Now sample is a [H, W, 4] tensor; you may apply further processing for RGGB, etc.
+#             return torch.tensor(sample, dtype=torch.float32)
         
-        return sample
+#         return sample
     
 # def make_classification_eval_transform(
 #     *,

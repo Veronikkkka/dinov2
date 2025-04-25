@@ -136,12 +136,12 @@ def get_args_parser(
         train_dataset_str="Main:root=/home/paperspace/Documents/nika_space/main_dataset/:split=train",
         val_dataset_str="Main:root=/home/paperspace/Documents/nika_space/main_dataset/:split=val",
         test_dataset_strs=None,
-        epochs=3,
+        epochs=20,
         batch_size=128,
         num_workers=8,
-        epoch_length=1,
-        save_checkpoint_frequency=1,
-        eval_period_iterations=1250,
+        epoch_length=100,
+        save_checkpoint_frequency=3,
+        eval_period_iterations=100,
         learning_rates=[1e-5, 2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3, 2e-3, 5e-3, 1e-2, 2e-2, 5e-2, 0.1],
         val_metric_type=MetricType.MEAN_ACCURACY,
         test_metric_types=None,
@@ -222,9 +222,28 @@ class LinearPostprocessor(nn.Module):
 
     def forward(self, samples, targets):
         preds = self.linear_classifier(samples)
+        
+        # Define the class mapping as a tensor
+        self.class_mapping = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        
+        # Check if targets are in range before remapping
+        if torch.any(targets >= preds.size(1)):
+            raise ValueError("Index in targets is out of bounds for preds.")
+        
+        # Remap predictions to only include the 3 classes
+        remapped_preds = preds[:, self.class_mapping]
+        
+        # Remap targets from original indices (0,1,5) to new indices (0,1,2)
+        remapped_targets = torch.zeros_like(targets)
+        for i, orig_class in enumerate(self.class_mapping):
+            remapped_targets[targets == orig_class] = i
+        
+        # print(f"Original preds shape: {preds.shape}, Remapped preds shape: {remapped_preds.shape}")
+        # print(f"Original targets unique: {targets.unique()}, Remapped targets unique: {remapped_targets.unique()}")
+        
         return {
-            "preds": preds[:, self.class_mapping] if self.class_mapping is not None else preds,
-            "target": targets,
+            "preds": remapped_preds,
+            "target": remapped_targets,
         }
 
 
@@ -272,6 +291,7 @@ def evaluate_linear_classifiers(
     logger.info("running validation !")
 
     num_classes = len(class_mapping) if class_mapping is not None else training_num_classes
+    print("Num classes in evaluate: ", num_classes)
     metric = build_metric(metric_type, num_classes=num_classes)
     postprocessors = {k: LinearPostprocessor(v, class_mapping) for k, v in linear_classifiers.classifiers_dict.items()}
     metrics = {k: metric.clone() for k in linear_classifiers.classifiers_dict}
@@ -295,6 +315,7 @@ def evaluate_linear_classifiers(
         ) or classifier_string == best_classifier_on_val:
             max_accuracy = metric["top-1"].item()
             best_classifier = classifier_string
+        
 
     results_dict["best_classifier"] = {"name": best_classifier, "accuracy": max_accuracy}
 
@@ -420,6 +441,9 @@ def make_eval_data_loader(test_dataset_str, batch_size, num_workers, metric_type
         dataset_str=test_dataset_str,
         transform=make_classification_eval_transform(),
     )
+    print("Targets: ", torch.unique(torch.tensor(test_dataset.get_targets())))
+    val_num_classes = len(torch.unique(torch.tensor(test_dataset.get_targets())))
+    
     test_data_loader = make_data_loader(
         dataset=test_dataset,
         batch_size=batch_size,
@@ -430,7 +454,7 @@ def make_eval_data_loader(test_dataset_str, batch_size, num_workers, metric_type
         persistent_workers=False,
         collate_fn=_pad_and_collate if metric_type == MetricType.IMAGENET_REAL_ACCURACY else None,
     )
-    return test_data_loader
+    return test_data_loader, val_num_classes
 
 
 def test_on_datasets(
@@ -450,7 +474,7 @@ def test_on_datasets(
     results_dict = {}
     for test_dataset_str, class_mapping, metric_type in zip(test_dataset_strs, test_class_mappings, test_metric_types):
         logger.info(f"Testing on {test_dataset_str}")
-        test_data_loader = make_eval_data_loader(test_dataset_str, batch_size, num_workers, metric_type)
+        test_data_loader, val_num_classes = make_eval_data_loader(test_dataset_str, batch_size, num_workers, metric_type)
         dataset_results_dict = evaluate_linear_classifiers(
             feature_model,
             remove_ddp_wrapper(linear_classifiers),
@@ -505,8 +529,21 @@ def run_eval_linear(
     )
     print(train_dataset.get_targets())
     #training_num_classes = len(torch.unique(torch.Tensor(train_dataset.get_targets().astype(int))))
+    # targets = train_dataset.get_targets()
+
+    # # Filter out None values
+    # clean_targets = [t for t in targets if t is not None]
+
+    # # Convert to tensor
+    # targets_tensor = torch.tensor(clean_targets, dtype=torch.long)
+
+    # # Get number of classes
+    # training_num_classes = int(torch.max(targets_tensor).item()) + 1
+
+    print(train_dataset.get_targets())
+    print(torch.tensor(train_dataset.get_targets()))
     training_num_classes = int(torch.max(torch.tensor(train_dataset.get_targets())).item()) + 1
-    print(training_num_classes)
+    print("Num classes:", training_num_classes)
     sampler_type = SamplerType.SHARDED_INFINITE
     # sampler_type = SamplerType.INFINITE
 
@@ -524,7 +561,10 @@ def run_eval_linear(
         training_num_classes,
     )
 
-    optimizer = torch.optim.SGD(optim_param_groups, momentum=0.9, weight_decay=0)
+    optimizer = torch.optim.SGD(optim_param_groups, momentum=0.9, weight_decay=0.01)
+    # optimizer = torch.optim.AdamW([
+    #     {'params': linear_classifiers.parameters(), 'lr': learning_rates[0]},
+    # ], weight_decay=0.05)
     max_iter = epochs * epoch_length
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, max_iter, eta_min=0)
     checkpointer = Checkpointer(linear_classifiers, output_dir, optimizer=optimizer, scheduler=scheduler)
@@ -540,8 +580,8 @@ def run_eval_linear(
         drop_last=True,
         persistent_workers=True,
     )
-    val_data_loader = make_eval_data_loader(val_dataset_str, batch_size, num_workers, val_metric_type)
-
+    val_data_loader, val_num_classes = make_eval_data_loader(val_dataset_str, batch_size, num_workers, val_metric_type)
+    print("Num val classes:", val_num_classes)
     checkpoint_period = save_checkpoint_frequency * epoch_length
 
     if val_class_mapping_fpath is not None:
@@ -549,7 +589,7 @@ def run_eval_linear(
         val_class_mapping = np.load(val_class_mapping_fpath)
     else:
         val_class_mapping = None
-
+        
     test_class_mappings = []
     for class_mapping_fpath in test_class_mapping_fpaths:
         if class_mapping_fpath is not None and class_mapping_fpath != "None":
@@ -574,7 +614,7 @@ def run_eval_linear(
         running_checkpoint_period=epoch_length,
         eval_period=eval_period_iterations,
         metric_type=val_metric_type,
-        training_num_classes=training_num_classes,
+        training_num_classes=val_num_classes,
         resume=resume,
         val_class_mapping=val_class_mapping,
         classifier_fpath=classifier_fpath,

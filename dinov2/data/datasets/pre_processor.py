@@ -52,6 +52,7 @@ class RAWDataPreProcessor:
         else:
             return data
 
+import ast
 
 class UniformDataset(Dataset):
     def __init__(self, root, transform=None, target_transform=None, split="train",
@@ -82,13 +83,76 @@ class UniformDataset(Dataset):
         self.label_map = {}
         self._load_dataset()
 
+    # def _load_dataset(self):
+    #     """Loads image paths and labels, mapping text labels to numbers."""
+    #     label_idx = 0
+    #     split_root = os.path.join(self.root, self.split)
+
+    #     label_dict = {}
+    #     labels_file = os.path.join(self.root, "generalized_labels.txt")
+    #     if os.path.exists(labels_file):
+    #         with open(labels_file, "r", encoding="utf-8") as f:
+    #             for line in f:
+    #                 parts = line.strip().split(" ")
+    #                 if len(parts) < 2:
+    #                     continue
+    #                 filename, *label_text = parts
+    #                 # if "ADE" not in filename:
+    #                 #     break
+    #                 # print(label_text)
+    #                 label_text = " ".join(label_text)
+
+    #                 if label_text not in self.label_map:
+    #                     self.label_map[label_text] = label_idx
+    #                     label_idx += 1
+    #                 label_dict[filename] = self.label_map[label_text]
+
+    #     # print("Label dict ", label_dict)
+    #     for subfolder in sorted(os.listdir(split_root)):  
+    #         # if subfolder != "ade":
+    #         #     continue
+    #         # if subfolder != "raise":
+    #         #     continue
+    #         subfolder_path = os.path.join(split_root, subfolder)
+    #         images_folder = os.path.join(subfolder_path, "images")
+            
+
+    #         if not os.path.isdir(images_folder):
+    #             continue
+
+            
+
+    #         # max = 0
+    #         # p = None
+    #         # i = 0
+    #         # for img_name in sorted(os.listdir(images_folder)):
+    #         #     # if i >= 500 and self.split == "train":
+    #         #     #     break
+    #         #     # if i >= 100 and self.split == "val":
+    #         #     #     break
+    #         #     img_path = os.path.join(images_folder, img_name)
+    #         #     base_name = img_name.split(".npy")[0]
+    #         #     label = label_dict.get(base_name, None)
+    #         #     # if label == None:
+    #         #     #     import time
+    #         #     #     time.sleep(2)
+    #         #     #     print(img_name)
+    #         #     # if label > max:
+    #         #     #     max = label
+    #         #     #     p = img_path
+    #         #     self.data.append((img_path, label))
+    #         #     i += 1
+    #     # print("Max", p, max)
+    #     self.check_after_loading()
+    #     print(self.label_map)
+
     def _load_dataset(self):
         """Loads image paths and labels, mapping text labels to numbers."""
         label_idx = 0
         split_root = os.path.join(self.root, self.split)
 
         label_dict = {}
-        labels_file = os.path.join(self.root, "labels.txt")
+        labels_file = os.path.join(self.root, "generalized_labels.txt")
         if os.path.exists(labels_file):
             with open(labels_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -96,7 +160,21 @@ class UniformDataset(Dataset):
                     if len(parts) < 2:
                         continue
                     filename, *label_text = parts
-                    label_text = " ".join(label_text)
+                    # if "ADE" not in filename:
+                    #     break
+                    label_text = label_text[0].split(";")
+                    # print(label_text)
+
+                    if len(label_text) > 1:
+                        if "indoor" in label_text:
+                            label_text = "indoor"
+                        elif "outdoor" in label_text:
+                            label_text = "outdoor"
+                        else:
+                            continue
+                    else:
+                        label_text = label_text[0]
+                    # label_text = " ".join(label_text)
                     if label_text not in self.label_map:
                         self.label_map[label_text] = label_idx
                         label_idx += 1
@@ -104,6 +182,8 @@ class UniformDataset(Dataset):
 
         # print("Label dict ", label_dict)
         for subfolder in sorted(os.listdir(split_root)):  
+            # if subfolder != "ade":
+            #     continue
             # if subfolder != "raise":
             #     continue
             subfolder_path = os.path.join(split_root, subfolder)
@@ -114,17 +194,30 @@ class UniformDataset(Dataset):
                 continue
 
 
-
+            max = 0
+            p = None
+            i = 0
             for img_name in sorted(os.listdir(images_folder)):
+                # if i >= 2000 and self.split == "train":
+                #     break
+                if i >= 1000 and self.split == "val":
+                    break
                 img_path = os.path.join(images_folder, img_name)
                 base_name = img_name.split(".npy")[0]
-                label = label_dict.get(base_name, -1)
-                # if label == -1:
+                label = label_dict.get(base_name, None)
+                if label == None:
                 #     import time
                 #     time.sleep(2)
+                    # print(img_name)
+                    continue
+                if label > max:
+                    max = label
+                    p = img_path
                 self.data.append((img_path, label))
+                i += 1
+        print("Max", p, max)
         self.check_after_loading()
-
+        print(self.label_map)
 
     def check_after_loading(self):
         import random, time
@@ -160,7 +253,8 @@ class UniformDataset(Dataset):
         img_path, label = self.data[idx]
 
         try:
-
+            # image = self.load_and_trivial_rggb_to_rgb(img_path)
+            # # image.save("mmm.png")
             loaded_data = np.load(img_path, allow_pickle=True)
             # print("Loaded ", loaded_data.shape, img_path)
             if isinstance(loaded_data, dict):
@@ -250,19 +344,22 @@ class UniformDataset(Dataset):
             # resized_tensor = TF.resize(tensor, size=(224, 224), interpolation=TF.InterpolationMode.BILINEAR)
             
             if self.transform:
+                # image = self.transform(transforms.ToTensor()(image))
                 image = self.transform(processed_image)
                 # image = self.transform(resized_tensor)
-            else:
-                # print("Self transform")
-                image = transforms.ToTensor()(processed_image) 
+            # else:
+            #     # print("Self transform")
+            #     image = transforms.ToTensor()(processed_image) 
             
-            # print("Image: ", type(image))
+            # # print("Image: ", type(image))
             if type(image) != torch.Tensor:
                 self.visualize_rggb_image(image['global_crops'][0].permute(1, 2, 0), "global_crop1.png")
             else:
+
                 self.visualize_rggb_image(image.permute(1, 2, 0), "global_crop1.png")
-            # self.visualize_rggb_image(image['global_crops'][1], "global_crop2.png")
-                # print(f"Image shape: {image.shape}")
+
+            # # self.visualize_rggb_image(image['global_crops'][1], "global_crop2.png")
+            #     # print(f"Image shape: {image.shape}")
 
 
             # visualization_image = image['global_crops'][0][:3]  # Extract RGB channels
@@ -287,7 +384,7 @@ class UniformDataset(Dataset):
     
     def get_targets(self):
         """Returns a list of all labels in the dataset."""
-        return np.array([label for _, label in self.data])
+        return np.array([label for _, label in self.data], dtype=np.int64)
     
     def visualize_rggb_image(self, tensor, output_path="visualized_image.png"):
         """
@@ -338,3 +435,52 @@ class UniformDataset(Dataset):
         Image.fromarray(rgb_normalized).save(output_path)
         
         return rgb_normalized
+
+    def load_and_trivial_rggb_to_rgb(self, npy_path):
+        import cv2
+        array = np.load(npy_path)  # shape (4, H, W)
+        # print("Before conversion:", array.min(), array.max(), array.dtype)
+        if array.dtype != np.uint8:
+            if array.max() > 1:
+                # Likely raw uint16-like (e.g. 0–1023, 0–4095, etc.)
+                array = (array / array.max() * 255).astype(np.uint8)
+            else:
+                # Already normalized float32 (0–1 range)
+                # print("Float normalized — scaling to 255")
+                array = (array * 255).astype(np.uint8)
+        # print("After conversion:", array.min(), array.max(), array.dtype)
+        # print(array)
+        bayer_mosaic = pack_rggb_planes_to_bayer(array)  # shape (512, 768)
+        # Demosaic to RGB
+        rgb = cv2.cvtColor(bayer_mosaic, cv2.COLOR_BAYER_RG2RGB)
+        # rgb = np.clip(rgb, 0, 1023) 
+        
+        # rgb = (rgb / 1023.0 * 255).astype(np.uint8)
+        # print(rgb, image_path)
+        # Convert to PIL
+        raw_image = Image.fromarray(rgb)
+        return raw_image
+
+def pack_rggb_planes_to_bayer(raw_rggb_planes):
+    """
+    Takes a (4, H, W) array with RGGB planes and returns a (2H, 2W) Bayer mosaic image.
+    Assumes:
+      raw[0] = R
+      raw[1] = G1
+      raw[2] = G2
+      raw[3] = B
+    """
+    R, G1, G2, B = raw_rggb_planes
+    H, W = R.shape
+
+    bayer = np.zeros((H * 2, W * 2), dtype=R.dtype)
+
+    # RGGB layout:
+    # R G
+    # G B
+    bayer[0::2, 0::2] = R     # Top-left
+    bayer[0::2, 1::2] = G1    # Top-right
+    bayer[1::2, 0::2] = G2    # Bottom-left
+    bayer[1::2, 1::2] = B     # Bottom-right
+
+    return bayer

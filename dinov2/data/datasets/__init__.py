@@ -10,3 +10,4 @@ from .raw_nod import RAWNODDataset
 from .raise_dataset import RaiseDataset
 from .npz_raw import NPZDataset
 from .pre_processor import UniformDataset
+from .datasee_for_obj_det import ObjDetDataset

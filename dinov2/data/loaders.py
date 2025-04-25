@@ -13,7 +13,7 @@ from torch.utils.data import Sampler
 from .datasets import ImageNet, ImageNet22k
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
 from .datasets import (
-    ADK20Dataset, RAWNODDataset, RaiseDataset, NPZDataset, UniformDataset
+    ADK20Dataset, RAWNODDataset, RaiseDataset, NPZDataset, UniformDataset, ObjDetDataset
 )
 
 
@@ -69,6 +69,8 @@ def _parse_dataset_str(dataset_str: str):
         class_ = NPZDataset
     elif name == "Main":
         class_ = UniformDataset
+    elif name == "Obj":
+        class_ = ObjDetDataset
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 

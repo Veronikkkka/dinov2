@@ -22,7 +22,9 @@ def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
     if urlparse(pretrained_weights).scheme:  # If it looks like an URL
         state_dict = torch.hub.load_state_dict_from_url(pretrained_weights, map_location="cpu")
     else:
-        state_dict = torch.load(pretrained_weights, map_location="cpu")
+        state_dict =torch.load(pretrained_weights, map_location="cpu", weights_only=False)
+
+        # state_dict = torch.load(pretrained_weights, map_location="cpu")
         state_dict = state_dict['model']
     if checkpoint_key is not None:
         print("INSIDE IF")

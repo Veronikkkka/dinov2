@@ -29,15 +29,9 @@ class DINOv2SegmentationModel(nn.Module):
         self.feature_dim = self.backbone.embed_dim
         print(f"Using feature dimension: {self.feature_dim}")
         
-        # freeze backbone parameters
-        # for param in self.backbone.parameters():
-        #     param.requires_grad = False
-            
-        # unfreeze specific layers if needed for fine-tuning
+        
         self.params_to_update = []
         for name, param in self.backbone.named_parameters():
-            # only fine-tune the last few blocks
-            # if "blocks.11" in name or "blocks.10" in name:
             param.requires_grad = True
             self.params_to_update.append(param)
         
@@ -47,7 +41,6 @@ class DINOv2SegmentationModel(nn.Module):
 
         features = self.backbone.get_intermediate_layers(x, n=1)[0]  # [B, N+1, C]
 
-        # Remove CLS token
         patch_tokens = features[:, 1:, :]  # [B, 255, C]
 
         batch_size = x.shape[0]
@@ -257,8 +250,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 print(f'Epoch {epoch+1}/{num_epochs}, Batch {i}/{len(train_loader)}, Loss: {loss.item():.4f}, ETA: {eta}')
         
         train_loss = train_loss / len(train_loader.dataset)
-        
-        # validation
+
         model.eval()
         val_loss = 0.0
         val_miou = 0.0
@@ -273,17 +265,17 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
                 
                 val_loss += loss.item() * images.size(0)
                 
-                # Calculate mIoU
+  
                 preds = torch.argmax(outputs, dim=1)
                 val_miou += calculate_miou(preds, masks, num_classes=model.decoder.conv4.out_channels).item()
         
         val_loss = val_loss / len(val_loader.dataset)
         val_miou = val_miou / len(val_loader)
         
-        # Update learning rate
+
         scheduler.step(val_loss)
         
-        epoch_time = time.time() - epoch_start_time  # Time for the entire epoch
+        epoch_time = time.time() - epoch_start_time
         eta_epoch = time.strftime('%H:%M:%S', time.gmtime((num_epochs - epoch - 1) * epoch_time))
         
         print(f'Epoch {epoch+1}/{num_epochs}, '
@@ -292,7 +284,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, num_epoch
               f'Val mIoU: {val_miou:.4f}, '
               f'ETA for completion: {eta_epoch}')
         
-        # Save best model
+        
         if val_miou > best_miou:
             best_miou = val_miou
             torch.save(model.state_dict(), 'best_dinov2_segmentation.pth')
@@ -319,8 +311,6 @@ def calculate_miou(preds, targets, num_classes):
         target_mask = (targets == cls)
         
         if target_mask.sum() == 0 and pred_mask.sum() == 0:
-            # If this class is not present in both prediction and ground truth
-            # we skip it
             continue
             
         intersection = torch.logical_and(pred_mask, target_mask).sum()
@@ -357,7 +347,6 @@ def test_model(model, test_loader, device='cuda'):
             outputs = model(images)
             preds = torch.argmax(outputs, dim=1)
             
-            # Calculate mIoU
             test_miou += calculate_miou(preds, masks, num_classes=model.decoder.conv4.out_channels).item()
     
     test_miou = test_miou / len(test_loader)
@@ -367,24 +356,22 @@ def test_model(model, test_loader, device='cuda'):
 
 
 def main(args):
-    # Set up DINOv2 model
     model, autocast_dtype = setup_and_build_model(args)
     
-    # Create transforms for images
     train_transform = make_classification_train_transform(
-        hflip_prob=0.5,  # Enable horizontal flips for data augmentation
-        crop_size=224,  # Adjust based on your model's requirements
+        hflip_prob=0.5,  
+        crop_size=224,
     )
     
     val_transform = make_classification_eval_transform(
-        crop_size=224  # Use same resolution as training for consistency
+        crop_size=224 
     )
     
-    # Create target transforms for masks
+
     mask_train_transform = transforms.Compose([
-        transforms.Lambda(lambda x: x.unsqueeze(0) if x.dim() == 2 else x),  # Add channel dim if needed
+        transforms.Lambda(lambda x: x.unsqueeze(0) if x.dim() == 2 else x), 
         transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.NEAREST),
-        transforms.Lambda(lambda x: x.squeeze(0) if x.shape[0] == 1 else x)  # Remove extra dim if needed
+        transforms.Lambda(lambda x: x.squeeze(0) if x.shape[0] == 1 else x) 
     ])
     
     mask_val_transform = transforms.Compose([
@@ -393,10 +380,9 @@ def main(args):
         transforms.Lambda(lambda x: x.squeeze(0) if x.shape[0] == 1 else x)
     ])
     
-    # Define dataset root
+
     dataset_root = "/home/paperspace/Documents/nika_space/main_dataset/" 
 
-    # Create datasets
     train_dataset = CustomSegmentationDataset(
         dataset_root, 
         split='train',
@@ -413,8 +399,7 @@ def main(args):
     
     print(f"Training dataset size: {len(train_dataset)}")
     print(f"Validation dataset size: {len(val_dataset)}")
-    
-    # Check a sample to validate dataset loading
+
     try:
         sample_img, sample_mask = train_dataset[0]
         print(f"Sample image shape: {sample_img.shape}")
@@ -423,7 +408,7 @@ def main(args):
     except Exception as e:
         print(f"Error loading sample: {e}")
     
-    # Count the number of classes in your dataset
+
     num_classes = count_dataset_classes(train_dataset)
     print(f"Using {num_classes} classes for segmentation")
     

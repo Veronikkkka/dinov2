@@ -223,23 +223,17 @@ class LinearPostprocessor(nn.Module):
     def forward(self, samples, targets):
         preds = self.linear_classifier(samples)
         
-        # Define the class mapping as a tensor
         self.class_mapping = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
         
-        # Check if targets are in range before remapping
         if torch.any(targets >= preds.size(1)):
             raise ValueError("Index in targets is out of bounds for preds.")
         
-        # Remap predictions to only include the 3 classes
         remapped_preds = preds[:, self.class_mapping]
         
-        # Remap targets from original indices (0,1,5) to new indices (0,1,2)
         remapped_targets = torch.zeros_like(targets)
         for i, orig_class in enumerate(self.class_mapping):
             remapped_targets[targets == orig_class] = i
         
-        # print(f"Original preds shape: {preds.shape}, Remapped preds shape: {remapped_preds.shape}")
-        # print(f"Original targets unique: {targets.unique()}, Remapped targets unique: {remapped_targets.unique()}")
         
         return {
             "preds": remapped_preds,
@@ -373,12 +367,6 @@ def eval_linear(
         features = feature_model(data)
         outputs = linear_classifiers(features)
 
-        # for k, v in outputs.items():
-        #     num_classes = v.shape[1]
-        #     if (labels < 0).any() or (labels >= num_classes).any():
-        #         print(f"🚨 ERROR: Label out of bounds for classifier '{k}'")
-        #         print(f"Min label: {labels.min().item()}  Max label: {labels.max().item()}  Expected < {num_classes}")
-        #         raise ValueError("Invalid label detected.")
 
         losses = {f"loss_{k}": nn.CrossEntropyLoss()(v, labels) for k, v in outputs.items()}
         loss = sum(losses.values())
@@ -528,18 +516,7 @@ def run_eval_linear(
         transform=train_transform,
     )
     print(train_dataset.get_targets())
-    #training_num_classes = len(torch.unique(torch.Tensor(train_dataset.get_targets().astype(int))))
-    # targets = train_dataset.get_targets()
-
-    # # Filter out None values
-    # clean_targets = [t for t in targets if t is not None]
-
-    # # Convert to tensor
-    # targets_tensor = torch.tensor(clean_targets, dtype=torch.long)
-
-    # # Get number of classes
-    # training_num_classes = int(torch.max(targets_tensor).item()) + 1
-
+    
     print(train_dataset.get_targets())
     print(torch.tensor(train_dataset.get_targets()))
     training_num_classes = int(torch.max(torch.tensor(train_dataset.get_targets())).item()) + 1

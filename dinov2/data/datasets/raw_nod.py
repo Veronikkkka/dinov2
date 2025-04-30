@@ -37,21 +37,18 @@ class RAWNODDataset(Dataset):
         self.target_transform = target_transform
         print("root:", self.root)
 
-        # Initialize attributes
-        self.image_info = {}  # Fix: Ensure image_info exists
-        self.labels = {}  # Mapping of image_id → class labels
-        self.class_to_idx = {}  # Mapping of class names → class IDs
-        self.idx_to_class = {}  # Mapping of class IDs → class names
+        self.image_info = {}
+        self.labels = {}
+        self.class_to_idx = {}
+        self.idx_to_class = {}
 
-        # Load annotations
         self._load_annotations(annotations_file)
 
-        # Load image paths
         self.image_paths = sorted(list(self.root.rglob("*.NEF")) + list(self.root.rglob("*.JPEG")))
         if not self.image_paths:
             raise ValueError(f"No images found in dataset directory: {root}")
 
-        # Filter image paths based on loaded annotations
+
         self.image_paths = [p for p in self.image_paths if self._get_image_id(p) in self.labels]
 
         if shuffle:
@@ -74,22 +71,21 @@ class RAWNODDataset(Dataset):
             with open(annotation_file, "r") as f:
                 data = json.load(f)
 
-            self.image_info = {}  # Ensure this is initialized
-            self.labels = {}  # Reset labels
+            self.image_info = {}
+            self.labels = {}
             self.class_to_idx = {}
             self.idx_to_class = {}
 
-            # Process category labels
+
             for category in data["categories"]:
                 self.class_to_idx[category["name"]] = category["id"]
                 self.idx_to_class[category["id"]] = category["name"]
 
-            # Process images
-            for img in data["images"]:
-                self.image_info[img["id"]] = img  # Store image metadata
-                self.labels[img["id"]] = []  # Initialize empty label list
 
-            # Process annotations
+            for img in data["images"]:
+                self.image_info[img["id"]] = img 
+                self.labels[img["id"]] = []
+
             for anno in data["annotations"]:
                 img_id = anno["image_id"]
                 category_id = anno["category_id"]
@@ -125,27 +121,26 @@ class RAWNODDataset(Dataset):
         Returns:
             Tuple[torch.Tensor, torch.Tensor, str]: (image, target, filepath)
         """
-        adjusted_index = index % self.true_len  # Avoid division by zero error
+        adjusted_index = index % self.true_len  
         filepath = str(self.image_paths[adjusted_index])
         
         try:
-            # image = Image.open(filepath).convert("RGB")
             raw = rawpy.imread(filepath)
             rgb = raw.postprocess()
             image = Image.fromarray(rgb)
         except Exception as e:
             print(f"Error loading image {filepath}: {e}")
-            return self.__getitem__((index + 1) % self.true_len)  # Skip to next valid image
+            return self.__getitem__((index + 1) % self.true_len) 
 
         if self.transform:
             image = self.transform(image)
 
-        # Get label for this image
+
         image_id = self._get_image_id(Path(filepath))
         if image_id in self.labels:
             target = torch.tensor(self.labels[image_id])
         else:
-            # Use -1 as label for images without annotations
+ 
             target = torch.tensor(-1)
 
         if self.target_transform:
@@ -170,7 +165,7 @@ class RAWNODDataset(Dataset):
             if image_id in self.labels:
                 targets.append(self.labels[image_id])
             else:
-                targets.append(-1)  # Use -1 for unknown labels
+                targets.append(-1)
         
         return np.array(targets, dtype=np.int64)
     

@@ -83,69 +83,7 @@ class UniformDataset(Dataset):
         self.label_map = {}
         self._load_dataset()
 
-    # def _load_dataset(self):
-    #     """Loads image paths and labels, mapping text labels to numbers."""
-    #     label_idx = 0
-    #     split_root = os.path.join(self.root, self.split)
-
-    #     label_dict = {}
-    #     labels_file = os.path.join(self.root, "generalized_labels.txt")
-    #     if os.path.exists(labels_file):
-    #         with open(labels_file, "r", encoding="utf-8") as f:
-    #             for line in f:
-    #                 parts = line.strip().split(" ")
-    #                 if len(parts) < 2:
-    #                     continue
-    #                 filename, *label_text = parts
-    #                 # if "ADE" not in filename:
-    #                 #     break
-    #                 # print(label_text)
-    #                 label_text = " ".join(label_text)
-
-    #                 if label_text not in self.label_map:
-    #                     self.label_map[label_text] = label_idx
-    #                     label_idx += 1
-    #                 label_dict[filename] = self.label_map[label_text]
-
-    #     # print("Label dict ", label_dict)
-    #     for subfolder in sorted(os.listdir(split_root)):  
-    #         # if subfolder != "ade":
-    #         #     continue
-    #         # if subfolder != "raise":
-    #         #     continue
-    #         subfolder_path = os.path.join(split_root, subfolder)
-    #         images_folder = os.path.join(subfolder_path, "images")
-            
-
-    #         if not os.path.isdir(images_folder):
-    #             continue
-
-            
-
-    #         # max = 0
-    #         # p = None
-    #         # i = 0
-    #         # for img_name in sorted(os.listdir(images_folder)):
-    #         #     # if i >= 500 and self.split == "train":
-    #         #     #     break
-    #         #     # if i >= 100 and self.split == "val":
-    #         #     #     break
-    #         #     img_path = os.path.join(images_folder, img_name)
-    #         #     base_name = img_name.split(".npy")[0]
-    #         #     label = label_dict.get(base_name, None)
-    #         #     # if label == None:
-    #         #     #     import time
-    #         #     #     time.sleep(2)
-    #         #     #     print(img_name)
-    #         #     # if label > max:
-    #         #     #     max = label
-    #         #     #     p = img_path
-    #         #     self.data.append((img_path, label))
-    #         #     i += 1
-    #     # print("Max", p, max)
-    #     self.check_after_loading()
-    #     print(self.label_map)
-
+    
     def _load_dataset(self):
         """Loads image paths and labels, mapping text labels to numbers."""
         label_idx = 0
@@ -160,10 +98,8 @@ class UniformDataset(Dataset):
                     if len(parts) < 2:
                         continue
                     filename, *label_text = parts
-                    # if "ADE" not in filename:
-                    #     break
+
                     label_text = label_text[0].split(";")
-                    # print(label_text)
 
                     if len(label_text) > 1:
                         if "indoor" in label_text:
@@ -174,16 +110,14 @@ class UniformDataset(Dataset):
                             continue
                     else:
                         label_text = label_text[0]
-                    # label_text = " ".join(label_text)
                     if label_text not in self.label_map:
                         self.label_map[label_text] = label_idx
                         label_idx += 1
                     label_dict[filename] = self.label_map[label_text]
 
-        # print("Label dict ", label_dict)
+
         for subfolder in sorted(os.listdir(split_root)):  
-            # if subfolder != "ade":
-            #     continue
+
             subfolder_path = os.path.join(split_root, subfolder)
             images_folder = os.path.join(subfolder_path, "images")
             
@@ -196,17 +130,10 @@ class UniformDataset(Dataset):
             p = None
             i = 0
             for img_name in sorted(os.listdir(images_folder)):
-                # if i >= 2000 and self.split == "train":
-                #     break
-                if i >= 1000 and self.split == "val":
-                    break
                 img_path = os.path.join(images_folder, img_name)
                 base_name = img_name.split(".npy")[0]
                 label = label_dict.get(base_name, None)
                 if label == None:
-                #     import time
-                #     time.sleep(2)
-                    # print(img_name)
                     continue
                 if label > max:
                     max = label
@@ -234,15 +161,11 @@ class UniformDataset(Dataset):
             
             raw_tensor = torch.from_numpy(raw_image).float()
             processed_dict = self.preprocessor({"image": raw_tensor})
-            # processed_dict = {"image": raw_tensor}
             visualization_image = processed_dict['image'][:3]
             visualization_image = visualization_image.cpu().detach().numpy()
             visualization_image = visualization_image.transpose(1, 2, 0)
             visualization_image = (visualization_image * 255).clip(0, 255).astype(np.uint8)
             img = Image.fromarray(visualization_image)
-
-            # img = img.resize((301, 200), resample=Image.BILINEAR)
-
             img_save_path = os.path.join(save_dir, f"image_{i}.png")
             img.save(img_save_path)
 
@@ -255,10 +178,8 @@ class UniformDataset(Dataset):
         img_path, label = self.data[idx]
 
         try:
-            # image = self.load_and_trivial_rggb_to_rgb(img_path)
-            # # image.save("mmm.png")
+
             loaded_data = np.load(img_path, allow_pickle=True)
-            # print("Loaded ", loaded_data.shape, img_path)
             if isinstance(loaded_data, dict):
 
                 data_dict = loaded_data
@@ -282,7 +203,6 @@ class UniformDataset(Dataset):
 
             if isinstance(raw_image, np.ndarray):
                 if raw_image.dtype == np.uint16:
-                    # print(f"Converting dtype of {img_path} from uint16 to float32.")
                     raw_image = raw_image.astype(np.float32) 
 
                 if len(raw_image.shape) == 3 and raw_image.shape[0] == 4:
@@ -303,73 +223,25 @@ class UniformDataset(Dataset):
 
             elif torch.is_tensor(raw_image):
                 raw_tensor = raw_image.float()
-                # print("Raw tensor", raw_tensor)
                 data_dict['image'] = raw_tensor
-                # print("Data dict", data_dict['image'])
 
-            # print("Img path ", img_path, data_dict['image'])
             processed_dict = self.preprocessor(data_dict)
             
             
             processed_image = processed_dict['image']
-            # processed_image = data_dict['image']
-            # print("Processed image: ", processed_image)
+
             processed_image = processed_image.cpu().detach()
-            # processed_image = processed_image.permute(1, 2, 0).numpy()
 
-            # if processed_image.dtype != np.uint8:
-            #     processed_image = (processed_image * 255).astype(np.uint8)
-
-             # Assuming 'processed_image' is a NumPy array in RGGB format
-            # tensor = torch.from_numpy(processed_image).float() 
-            # tensor = tensor / tensor.max()
-
-            # self.visualize_rggb_image(processed_image.permute(1, 2, 0), "original_raw.png")
-            # print("Before: ", processed_image)
-            # processed_image = Image.fromarray(processed_image)
-            # print("After: ", processed_image)
-
-            # Explicit image check
-            # visualization_image = processed_dict['image'][:3]  # Extract RGB channels
-            # visualization_image = visualization_image.cpu().detach().numpy()
-            # visualization_image = visualization_image.transpose(1, 2, 0)
-            # visualization_image = (visualization_image * 255).clip(0, 255).astype(np.uint8)
-            # Image.fromarray(visualization_image).save("output_rgb.png")
-
-            # resize_transform = transforms.Resize((224, 224))
-            # processed_image = resize_transform(processed_image)
-
-            # if tensor.shape[-1] == 4:  # [H, W, 4]
-            #     tensor = tensor.permute(2, 0, 1)  # → [4, H, W]
-            # #     self.visualize_rggb_image(tensor.permute(1, 2, 0), "tensor_1.png")
-
-            # resized_tensor = TF.resize(tensor, size=(224, 224), interpolation=TF.InterpolationMode.BILINEAR)
-            
             if self.transform:
-                # image = self.transform(transforms.ToTensor()(image))
                 image = self.transform(processed_image)
-                # image = self.transform(resized_tensor)
-            # else:
-            #     # print("Self transform")
-            #     image = transforms.ToTensor()(processed_image) 
-            
-            # # print("Image: ", type(image))
+
             if type(image) != torch.Tensor:
                 self.visualize_rggb_image(image['global_crops'][0].permute(1, 2, 0), "global_crop1.png")
             else:
 
                 self.visualize_rggb_image(image.permute(1, 2, 0), "global_crop1.png")
 
-            # # self.visualize_rggb_image(image['global_crops'][1], "global_crop2.png")
-            #     # print(f"Image shape: {image.shape}")
-
-
-            # visualization_image = image['global_crops'][0][:3]  # Extract RGB channels
-            # visualization_image = visualization_image.cpu().detach().numpy()
-            # visualization_image = visualization_image.transpose(1, 2, 0)
-            # visualization_image = (visualization_image * 255).clip(0, 255).astype(np.uint8)
-            # Image.fromarray(visualization_image).save("output_rgb_2.png")
-
+            
             if self.target_transform and label is not None:
                 label = self.target_transform(label)
             # processed_image.save("output.png")  
@@ -396,7 +268,7 @@ class UniformDataset(Dataset):
             tensor: Raw tensor with shape [H, W, 4]
             output_path: Path to save the visualization
         """
-        # Make sure tensor is on CPU
+
         if isinstance(tensor, torch.Tensor):
             if tensor.device.type != 'cpu':
                 tensor = tensor.cpu()
@@ -404,62 +276,48 @@ class UniformDataset(Dataset):
         else:
             tensor_np = tensor
         
-        # Extract RGGB channels
         r = tensor_np[:, :, 0]
         g1 = tensor_np[:, :, 1]
         g2 = tensor_np[:, :, 2]
         b = tensor_np[:, :, 3]
         
-        # Average the two green channels
         g = (g1 + g2) / 2
         
-        # Create RGB array
         rgb = np.stack([r, g, b], axis=2)
         
-        # Robust normalization using percentiles
+
         def robust_normalize(arr):
-            lower = np.percentile(arr, 2)  # 2nd percentile
-            upper = np.percentile(arr, 98)  # 98th percentile
+            lower = np.percentile(arr, 2)
+            upper = np.percentile(arr, 98)
             
-            # Prevent division by zero
             if upper == lower:
                 return np.zeros_like(arr)
             
-            # Clip and normalize
             arr_clipped = np.clip(arr, lower, upper)
             arr_norm = (arr_clipped - lower) / (upper - lower)
             return np.clip(arr_norm * 255, 0, 255).astype(np.uint8)
         
-        # Apply robust normalization
         rgb_normalized = robust_normalize(rgb)
-        
-        # Save image
+
         Image.fromarray(rgb_normalized).save(output_path)
         
         return rgb_normalized
 
     def load_and_trivial_rggb_to_rgb(self, npy_path):
         import cv2
-        array = np.load(npy_path)  # shape (4, H, W)
-        # print("Before conversion:", array.min(), array.max(), array.dtype)
+        array = np.load(npy_path)  #(4, H, W)
         if array.dtype != np.uint8:
             if array.max() > 1:
-                # Likely raw uint16-like (e.g. 0–1023, 0–4095, etc.)
                 array = (array / array.max() * 255).astype(np.uint8)
             else:
-                # Already normalized float32 (0–1 range)
-                # print("Float normalized — scaling to 255")
                 array = (array * 255).astype(np.uint8)
+
         # print("After conversion:", array.min(), array.max(), array.dtype)
         # print(array)
-        bayer_mosaic = pack_rggb_planes_to_bayer(array)  # shape (512, 768)
+        bayer_mosaic = pack_rggb_planes_to_bayer(array)
         # Demosaic to RGB
         rgb = cv2.cvtColor(bayer_mosaic, cv2.COLOR_BAYER_RG2RGB)
-        # rgb = np.clip(rgb, 0, 1023) 
-        
-        # rgb = (rgb / 1023.0 * 255).astype(np.uint8)
-        # print(rgb, image_path)
-        # Convert to PIL
+
         raw_image = Image.fromarray(rgb)
         return raw_image
 
@@ -477,9 +335,6 @@ def pack_rggb_planes_to_bayer(raw_rggb_planes):
 
     bayer = np.zeros((H * 2, W * 2), dtype=R.dtype)
 
-    # RGGB layout:
-    # R G
-    # G B
     bayer[0::2, 0::2] = R     # Top-left
     bayer[0::2, 1::2] = G1    # Top-right
     bayer[1::2, 0::2] = G2    # Bottom-left

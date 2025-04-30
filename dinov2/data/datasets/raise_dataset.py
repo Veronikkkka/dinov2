@@ -54,7 +54,6 @@ class RaiseDataset(Dataset):
                 file_name = os.path.basename(nef_url)
                 file_path = self.download_dir / file_name
 
-                # Get labels (last and second-to-last columns)
                 labels = [row["Keywords"], row["Scene Mode"]]
 
                 self.image_info.append({
@@ -63,7 +62,6 @@ class RaiseDataset(Dataset):
                     "labels": labels
                 })
                 
-                # Download image if not already present
                 if not file_path.exists():
                     self._download_image(nef_url, file_path)
                 i += 1
@@ -91,7 +89,6 @@ class RaiseDataset(Dataset):
         image = Image.open(info["file_path"]).convert("RGB")
         labels = info["labels"]
 
-        # Apply transformations
         if self.transform:
             image = self.transform(image)
         if self.target_transform:

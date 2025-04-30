@@ -133,8 +133,7 @@ class Matrix_Predictor(nn.Module):
         out = self.down(out)
         out, distance = out[:, :16, :], out[:, 16:, :].squeeze(-1)
         out = out.view(B, 4, 4)
-        # print(self.ccm_base)
-        # print(out)
+
 
         ccm_matrix = 0.1 * out + self.ccm_base
         distance = self.relu(distance) + 1
@@ -179,8 +178,6 @@ def _get_gaussian_kernel1d(kernel_size: int, sigma: float) -> Tensor:
     ksize_half = (kernel_size - 1) * 0.5
 
     x = torch.linspace(-ksize_half, ksize_half, steps=kernel_size).to(sigma.device)
-    #print(x.device)
-    #print(sigma.device)
     pdf = torch.exp(-0.5 * (x / sigma).pow(2))
     kernel1d = pdf / pdf.sum()
 
@@ -336,20 +333,18 @@ def _get_anisotropic_gaussian_kernel2d(
     batch_size = r1.shape[0]
     kernel_height, kernel_width = kernel_size
     
-    # coordinate grid
+
     x_grid = torch.linspace(-(kernel_width - 1) / 2, (kernel_width - 1) / 2, kernel_width, device=device)
     y_grid = torch.linspace(-(kernel_height - 1) / 2, (kernel_height - 1) / 2, kernel_height, device=device)
     y, x = torch.meshgrid(y_grid, x_grid, indexing='ij')
-    
-    # for batch processing
+
     x = x.expand(batch_size, -1, -1)
     y = y.expand(batch_size, -1, -1)
     
-    # equation (3) in the paper
+ 
     cos_theta = torch.cos(torch.tensor(theta, device=device))
     sin_theta = torch.sin(torch.tensor(theta, device=device))
-    
-    # Calculate b0, b1, b2 coefficients with broadcasting for batch support
+
     r1_squared = r1.view(batch_size, 1, 1).pow(2)
     r2_squared = r2.view(batch_size, 1, 1).pow(2)
     
@@ -357,27 +352,14 @@ def _get_anisotropic_gaussian_kernel2d(
     b1 = (torch.sin(2 * torch.tensor(theta, dtype=torch.float32)) / 4) * ((r1 / r2).pow(2) - 1) / r1_squared
     b2 = (sin_theta.pow(2) / (2 * r1_squared)) + (cos_theta.pow(2) / (2 * r2_squared))
     
-    # Compute kernel values using equation (2) from the paper
+
     kernel = torch.exp(-(b0 * x.pow(2) + 2 * b1 * x * y + b2 * y.pow(2)))
     
-    # Normalize the kernel
+
     kernel = kernel / kernel.sum(dim=(1, 2), keepdim=True)
     
     return kernel.to(dtype=dtype)
 
-# def Gain_Denoise(I1, r1, r2, gain, sigma, k_size=3):  # [9, 9] in LOD dataset, [3, 3] in other dataset
-#     out = []
-#     for i in range(I1.shape[0]):
-#         I1_gain = gain[i] * I1[i,:,:,:]
-#         # blur = gaussian_blur(I1_gain, \
-#         #                         [k_size, k_size], \
-#         #                         [r1[i], r2[i]])
-#         blur = anisotropic_gaussian_blur(I1_gain, \
-#                                 [k_size, k_size], \
-#                                 [r1[i], r2[i]])
-#         sharp = blur + sigma[i] * (I1[i,:,:,:] - blur)
-#         out.append(sharp)
-#     return torch.stack([out[i] for i in range(I1.shape[0])], dim=0)
 
 def Gain_Denoise(I1, r1, r2, gain, sigma, k_size=3):
     """
@@ -442,63 +424,29 @@ def Gain_Denoise(I1, r1, r2, gain, sigma, k_size=3):
     
     return torch.stack(out, dim=0)
 
-# Shades of Gray and Colour Constancy (Graham D. Finlayson, Elisabetta Trezzi)
-# def SoG_algo(img, p=1):
-#     # https://library.imaging.org/admin/apis/public/api/ist/website/downloadArticle/cic/12/1/art00008
-#     img = img.permute(1,2,0)       # (C,H,W) --> (H,W,C)
 
-#     img_P = torch.pow(img, p)
-
-#     R_avg = torch.mean(img_P[:,:,0]) ** (1/p)
-#     G_avg = torch.mean(img_P[:,:,1]) ** (1/p)
-#     B_avg = torch.mean(img_P[:,:,2]) ** (1/p)
-
-#     Avg = torch.mean(img_P) ** (1/p)
-
-#     R_avg = R_avg / Avg
-#     G_avg = G_avg / Avg
-#     B_avg = B_avg / Avg
-
-#     img_out = torch.stack([img[:,:,0]/R_avg, img[:,:,1]/G_avg, img[:,:,2]/B_avg], dim=-1)
-
-#     return img_out
 
 def SoG_algo(img, p=1):
     img = img.permute(1,2,0)  # (C,H,W) --> (H,W,C)
     
     img_P = torch.pow(img, p)
     
-    # Now calculate the average for each channel
+
     avg_channels = torch.mean(img_P, dim=(0, 1)) ** (1/p)  # Average for each channel
 
     Avg = torch.mean(img_P) ** (1/p)
 
-    # Normalize each channel
+
     img_out = torch.stack([img[:,:,i]/(avg_channels[i] / Avg) for i in range(img.shape[2])], dim=-1)
 
     return img_out
 
-# def WB_CCM(I2, ccm_matrix, distance):
-#     out_I3 = []
-#     out_I4 = []
-#     for i in range(I2.shape[0]):
-#         # SOG White Balance Algorithm
-#         I3 = SoG_algo(I2[i,:,:,:], distance[i])
 
-#         # Camera Color Matrix
-#         I4 = torch.tensordot(I3, ccm_matrix[i,:,:], dims=[[-1], [-1]])
-#         I4 = torch.clamp(I4, 1e-5, 1.0)
-
-#         out_I3.append(I3)
-#         out_I4.append(I4)
-
-#     return  torch.stack([out_I3[i] for i in range(I2.shape[0])], dim=0), \
-#             torch.stack([out_I4[i] for i in range(I2.shape[0])], dim=0)
 
 class WB_CCM_Adapter(nn.Module):
     def __init__(self):
         super(WB_CCM_Adapter, self).__init__()
-        # Linear transformation from 4 channels to 3 channels
+
         self.channel_reduction = nn.Conv2d(4, 3, kernel_size=1)
 
     def forward(self, I2, ccm_matrix, distance):
@@ -508,15 +456,8 @@ class WB_CCM_Adapter(nn.Module):
             # SOG White Balance Algorithm
             I3 = SoG_algo(I2[i,:,:,:], distance[i])
 
-            # Camera Color Matrix
             I4 = torch.tensordot(I3, ccm_matrix[i,:,:], dims=[[-1], [-1]])
             I4 = torch.clamp(I4, 1e-5, 1.0)
-
-            # Change the input shape to [B, C, H, W] format
-            # I4 = I4.permute(0, 3, 1, 2)  # From [B, H, W, C] to [B, C, H, W]
-
-            # Apply the learned channel reduction
-            # I4 = self.channel_reduction(I4)
 
             out_I3.append(I3)
             out_I4.append(I4)
@@ -564,18 +505,14 @@ class Input_level_Adapeter(nn.Module):
 
         if self.w_lut:
         # (4). I4 --> I5: Implicit Neural LUT
-            I4_reduced = self.channel_reduction(I4.permute(0,3,1,2))  # Convert to [B,C,H,W] and reduce to 3 channels
-            I5 = self.LUT(I4_reduced.permute(0,2,3,1))  # Convert back to [B,H,W,C] for LUT
+            I4_reduced = self.channel_reduction(I4.permute(0,3,1,2))
+            I5 = self.LUT(I4_reduced.permute(0,2,3,1)) 
             I5 = I5.permute(0,3,1,2) 
-            # I5 = self.LUT(I4).permute(0,3,1,2)
 
-            # # I5 = I5.permute(2, 0, 1).unsqueeze(0)  # [H, W, C] → [1, C, H, W]
-            # I5 = self.channel_reduction(I5)        # [1, 3, H, W]
-            # # I5 = I5.squeeze(0).permute(1, 2, 0)    # [1, 3, H, W] → [H, W, 3]
 
-            if self.out == 'all':   # return all features
+            if self.out == 'all':
                 return [I1, I2, I3.permute(0,3,1,2), I4.permute(0,3,1,2), I5]
-            else:   # only return I5
+            else:
                 return [I5]
 
         else:

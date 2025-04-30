@@ -37,13 +37,12 @@ class Merge_block(BaseModule):
 
     def forward(self, fea, adapter, ratio=1.0):
         res = fea
-        # print("Before concatenation: ", fea.shape, adapter.shape, self.fea_c, self.ada_c)
-        # print("before concatenation: ", fea.dtype, adapter.dtype)
-        fea = torch.cat([fea, adapter], dim=-1)  # (B, seq_len, fea_c + ada_c)
-        # print("after concatenation: ", fea.shape, adapter.shape)
+
+        fea = torch.cat([fea, adapter], dim=-1)
+
         B, seq_len, C = fea.shape
         fea = fea.view(B * seq_len, C) 
-        # print("before concatenation: ", fea.dtype, adapter.dtype)
+ 
         fea = fea.to(self.fc_1.weight.dtype)
         fea = self.fc_1(fea) 
         fea = fea.view(B, seq_len, -1)  
@@ -84,35 +83,31 @@ class BasicBlock(nn.Module):
         if dilation > 1:
             raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
         
-        # Both self.conv1 and self.downsample layers downsample the input when stride != 1
+    
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = norm_layer([planes])  # Modify this to pass the correct shape
+        self.bn1 = norm_layer([planes])
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3(planes, planes)
-        self.bn2 = norm_layer([planes])  # Modify this to pass the correct shape
+        self.bn2 = norm_layer([planes])
         self.downsample = downsample
         self.stride = stride
 
     def forward(self, x: Tensor) -> Tensor:
         identity = x
-        # x = x.to(self.expand_channels.weight.dtype)
+
         out = self.conv1(x)
-        # Reshape for LayerNorm
-        # C, H, W = out.shape
+
         if out.dim() == 3:
             out = out.unsqueeze(0)
         out = out.permute(0, 2, 3, 1)  # [B, C, H, W] -> [B, H, W, C]
-        out = self.bn1(out)  # Apply LayerNorm on the channel dimension (last)
+        out = self.bn1(out)
         out = out.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
         out = self.relu(out)
 
         out = self.conv2(out)
-        # if out.dim() == 3:
-        #     out = out.unsqueeze(0)
-        # Reshape for LayerNorm
-        # C, H, W = out.shape
+        
         out = out.permute(0, 2, 3, 1)  # [B, C, H, W] -> [B, H, W, C]
-        out = self.bn2(out)  # Apply LayerNorm on the channel dimension (last)
+        out = self.bn2(out)
         out = out.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
 
         if self.downsample is not None:
@@ -136,155 +131,23 @@ class Model_level_Adapeter(BaseModule):
         else:  # Without LUT: I1, I2, I3
             self.uni_conv = conv7x7(3*in_c, in_dim, 2, padding=3)
 
-        # self.res_1 = BasicBlock(inplanes=in_dim, planes=in_dim)
-        # self.res_2 = BasicBlock(inplanes=in_dim, planes=in_dim)
-
+        
     def forward(self, IMGS):
         if self.w_lut:
             adapter = torch.cat([self.conv_1(IMGS[0]), self.conv_2(IMGS[1]), self.conv_3(IMGS[2]), self.conv_4(IMGS[3])], dim=1)
 
         else:
             adapter = torch.cat([self.conv_1(IMGS[0]), self.conv_2(IMGS[1]), self.conv_3(IMGS[2])], dim=1)
-        # print("Adapter:", adapter.shape)
+
         adapter = self.uni_conv(adapter)
-        # print("Adapter:", adapter.shape)
-        # adapter = self.res_1(adapter)
-        # adapter = self.res_2(adapter)
+        
         return adapter
 
-# class Model_level_Adapeter(BaseModule):
-#     def __init__(self, in_c=12, in_dim=16, w_lut=True):
-#         super(Model_level_Adapeter, self).__init__()
-#         self.conv_1 = conv3x3(in_c, in_c, 2)
-#         self.conv_2 = conv3x3(in_c, in_c, 2)
-#         self.conv_3 = conv3x3(in_c, in_c, 2)
-#         self.w_lut = w_lut
-#         if self.w_lut:
-#             self.conv_4 = conv3x3(in_c, in_c, 2)
-#             self.channel_reducer = conv7x7(272, in_dim, 2, padding=3)
-#             self.uni_conv = conv7x7(12, in_dim, 2, padding=3)
-#         else:
-#             self.uni_conv = conv7x7(3*in_c, in_dim, 2, padding=3)
-
-#         self.res_1 = BasicBlock(inplanes=in_dim, planes=in_dim)
-#         self.res_2 = BasicBlock(inplanes=in_dim, planes=in_dim)
-#         self.expand_channels = nn.Conv2d(3, 32, kernel_size=1, stride=1, padding=0).to(torch.float16)
-
-#     def forward(self, IMGS):
-#         device = IMGS[0].device 
-#         print("DEVICE", device)
-#         IMGS = [img.to(torch.float16) for img in IMGS]
-
-#         reduce_channels = nn.Conv2d(32, 12, kernel_size=1, bias=False).to(device).to(torch.float16)
-
-#         IMGS = [img.to(self.expand_channels.weight.dtype) for img in IMGS]
-#         print("Types: ", IMGS[0].dtype, self.expand_channels.weight.dtype)
-        
-#         IMGS = [reduce_channels(self.expand_channels(img)) for img in IMGS]
-
-#         print(f"After first reduction: {IMGS[0].shape}")
-        
-
-#         temp_conv_1 = nn.Conv2d(12, 12, kernel_size=3, stride=2, padding=1, bias=False).to(device).to(torch.float16)
-#         temp_conv_2 = nn.Conv2d(12, 12, kernel_size=3, stride=2, padding=1, bias=False).to(device).to(torch.float16)
-#         temp_conv_3 = nn.Conv2d(12, 12, kernel_size=3, stride=2, padding=1, bias=False).to(device).to(torch.float16)
-#         print("HERE HERE")
-#         if self.w_lut:
-#             temp_conv_4 = nn.Conv2d(12, 12, kernel_size=3, stride=2, padding=1, bias=False).to(device).to(torch.float16)
-#             print("HERE HERE 22", len(IMGS))
-#             adapter = torch.cat([
-#                 temp_conv_1(IMGS[0]), 
-#                 temp_conv_2(IMGS[1]), 
-#                 temp_conv_3(IMGS[2]), 
-#                 temp_conv_4(IMGS[3])
-#             ], dim=1)
-#         else:
-#             adapter = torch.cat([
-#                 temp_conv_1(IMGS[0]), 
-#                 temp_conv_2(IMGS[1]), 
-#                 temp_conv_3(IMGS[2])
-#             ], dim=1)
-        
-#         adapter = adapter.half()
-#         print("HERE HERE 333")
-#         adapter = self.uni_conv(adapter)
-#         print("HERE HERE 44")
-#         adapter = self.res_1(adapter)   # Residual Block 1 
-#         adapter = self.res_2(adapter)   # Residual Block 2
-#         return adapter
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# class Input_level_Adapeter(nn.Module):
-#     def __init__(self, mode='normal', lut_dim=32, k_size=3, w_lut=True, in_channels=3):
-#         """
-#         Args:
-#             mode (str): Operating mode. Can be 'normal' or another mode if you extend this module.
-#             lut_dim (int): The output channel dimension if using the LUT branch.
-#             k_size (int): Kernel size for the convolutional layers.
-#             w_lut (bool): Whether to use the LUT branch.
-#             in_channels (int): Number of input channels. Typically 3 for RGB/RAW images.
-#         """
-#         super(Input_level_Adapeter, self).__init__()
-#         self.mode = mode
-#         self.lut_dim = lut_dim
-#         self.k_size = k_size
-#         self.w_lut = w_lut
-
-#         # First convolutional block.
-#         self.conv1 = nn.Conv2d(in_channels, 16, kernel_size=k_size, padding=k_size // 2, bias=False)
-#         # self.bn1 = nn.LayerNorm(16)
-#         self.relu = nn.ReLU(inplace=True)
-        
-#         # Second convolutional block.
-#         self.conv2 = nn.Conv2d(16, 32, kernel_size=k_size, padding=k_size // 2, bias=False)
-#         # self.bn2 = nn.LayerNorm(32)
-#         self.bn1 = nn.GroupNorm(1, 16)
-#         self.bn2 = nn.GroupNorm(1, 32)
-#         # If using LUT processing, map the 32-channel features to lut_dim channels.
-#         if self.w_lut:
-#             self.lut_conv = nn.Conv2d(32, lut_dim, kernel_size=1, bias=False)
-        
-#         # Create two downsampling layers for multi-scale outputs.
-#         self.down1 = nn.Conv2d(32 if not w_lut else lut_dim, 
-#                                32 if not w_lut else lut_dim, 
-#                                kernel_size=3, stride=2, padding=1, bias=False)
-#         self.down2 = nn.Conv2d(32 if not w_lut else lut_dim, 
-#                                32 if not w_lut else lut_dim, 
-#                                kernel_size=3, stride=2, padding=1, bias=False)
-        
-#     def forward(self, x):
-#         """
-#         Forward pass for the input-level adapter.
-#         Args:
-#             x (Tensor): Input image tensor of shape (B, in_channels, H, W).
-#         Returns:
-#             List[Tensor]: A list of feature maps at multiple scales. For example:
-#                           [feat_full, feat_down1, feat_down2]
-#                           where feat_down2 is the most downsampled feature used for adaptation.
-#         """
-#         # Initial conv block.
-#         out = self.conv1(x)
-#         out = self.bn1(out)
-#         out = self.relu(out)
-        
-#         out = self.conv2(out)
-#         out = self.bn2(out)
-#         out = self.relu(out)
-        
-#         # If enabled, adjust features via LUT branch.
-#         if self.w_lut:
-#             out = self.lut_conv(out)
-        
-#         # Compute multi-scale features.
-#         feat_full = out                   # Original resolution feature.
-#         feat_down1 = self.relu(self.down1(feat_full))  # Downsampled by a factor of 2.
-#         feat_down2 = self.relu(self.down2(feat_down1))   # Downsampled further.
-        
-#         # Return a list of features. In your transformer, you can pick the desired scale.
-#         return [feat_full, feat_down1, feat_down2]
 
 
 class CustomLayerNorm(nn.Module):
@@ -293,23 +156,17 @@ class CustomLayerNorm(nn.Module):
         self.norm = nn.LayerNorm(normalized_shape)
         
     def forward(self, x):
-        # Input has shape [B, S, D] or [B, C, H, W]
         if len(x.shape) == 3:  # [B, S, D] or [B, C, S]
             if x.shape[1] == self.norm.normalized_shape[0]:
-                # This is [B, C, S] format, need to transpose
                 x = x.transpose(1, 2)  # Now [B, S, C]
                 x = self.norm(x)
                 x = x.transpose(1, 2)  # Back to [B, C, S]
             else:
-                # Already in [B, S, C] format
                 x = self.norm(x)
         elif len(x.shape) == 4:  # [B, C, H, W]
             b, c, h, w = x.shape
-            # Reshape to [B, H*W, C]
             x = x.permute(0, 2, 3, 1).reshape(b, h*w, c)
-            # Apply norm
             x = self.norm(x)
-            # Reshape back to [B, C, H, W]
             x = x.reshape(b, h, w, c).permute(0, 3, 1, 2)
         return x
 
@@ -319,11 +176,8 @@ class Kernel_Predictor(nn.Module):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
-        # Use provided scale factor or default to head_dim^-0.5
         self.scale = qk_scale or head_dim ** -0.5
-        # Query Adaptive Learning (QAL)
         self.q = nn.Parameter(torch.rand((1, 4, dim)), requires_grad=True)
-        # self.input_proj = nn.Conv2d(16, 3, kernel_size=1) 
         self.kv_downsample = nn.Sequential(
             nn.Conv2d(3, dim // 8, kernel_size=3, stride=2, padding=1),
             nn.GroupNorm(1, dim // 8),  # replaced BatchNorm2d with GroupNorm
@@ -357,12 +211,7 @@ class Kernel_Predictor(nn.Module):
         self.r2_base = nn.Parameter(torch.FloatTensor([2]), requires_grad=False)
 
     def forward(self, x):
-        # print("X type: ", type(x), x.dim)
-        # x = x[0]
-        # x = self.input_proj(x)
-        # output = self.kv_downsample(x)
-        # print("Output type: ", type(output))  # This should print <class 'torch.Tensor'>, but it might print <class 'list'>
-
+        
         d_x = self.kv_downsample(x).flatten(2).transpose(1, 2)  # [B, N, C]
         B, N, C = d_x.shape
         k = self.k(d_x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
@@ -389,7 +238,6 @@ class Matrix_Predictor(nn.Module):
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
-        # Query Adaptive Learning (QAL)
         self.q = nn.Parameter(torch.rand((1, 9 + 1, dim)), requires_grad=True)
         self.kv_downsample = nn.Sequential(
             nn.Conv2d(3, dim // 8, kernel_size=3, stride=2, padding=1),
@@ -477,8 +325,6 @@ def _get_gaussian_kernel1d(kernel_size: int, sigma: float) -> Tensor:
     ksize_half = (kernel_size - 1) * 0.5
 
     x = torch.linspace(-ksize_half, ksize_half, steps=kernel_size).to(sigma.device)
-    #print(x.device)
-    #print(sigma.device)
     pdf = torch.exp(-0.5 * (x / sigma).pow(2))
     kernel1d = pdf / pdf.sum()
 
@@ -494,7 +340,6 @@ def _get_gaussian_kernel2d(
 
 def _cast_squeeze_in(img: Tensor, req_dtypes: List[torch.dtype]) -> Tuple[Tensor, bool, bool, torch.dtype]:
     need_squeeze = False
-    # make image NCHW
     if img.ndim < 4:
         img = img.unsqueeze(dim=0)
         need_squeeze = True

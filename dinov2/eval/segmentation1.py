@@ -43,86 +43,86 @@ def visualize_segmentation_predictions(model, data_loader, device, output_dir, n
         output_dir: Directory to save visualizations
         num_samples: Number of samples to visualize
     """
-    print("In visualization")
+    # Create output directory if it doesn't exist
     vis_dir = os.path.join(output_dir, "visualizations")
     os.makedirs(vis_dir, exist_ok=True)
     
+    # Set model to eval mode
     model.eval()
     
-    colormap = torch.randint(0, 256, (256, 3), dtype=torch.uint8)
-   
-    colormap[0] = torch.tensor([0, 0, 0], dtype=torch.uint8)
-    print("Num samples: ", num_samples)
-    processed_samples = 0
+    # Color map for segmentation mask visualization (adjust for your num_classes)
+    # This is a simple color map, you can create a more sophisticated one based on dataset
+    colormap = torch.randint(0, 256, (150, 3), dtype=torch.uint8)
+    colormap[0] = torch.tensor([0, 0, 0], dtype=torch.uint8)  # Background usually black
+    
     with torch.no_grad():
         for i, (images, targets) in enumerate(data_loader):
-
             if i >= num_samples:
                 break
                 
+            # Move to device
             images = images.to(device)
             targets = targets.to(device)
             
-
+            # Get predictions
             outputs = model(images)
-
             preds = outputs.argmax(dim=1)
-
+            
+            # Process each image in batch
             for j in range(images.shape[0]):
-
+                # Skip if we've already processed enough samples
                 if i*data_loader.batch_size + j >= num_samples:
                     break
                     
+                # Get single image and its prediction
                 image = images[j].cpu()
-                print("Image: ", image.shape, image.min(), image.max())
                 target = targets[j].cpu()
-                unique_target, counts_target = torch.unique(target, return_counts=True)
-                
                 pred = preds[j].cpu()
-                unique_pred, counts_pred = torch.unique(pred, return_counts=True)
-                print("GT: ", unique_target, counts_target)
-                print("Unique: ", unique_pred, counts_pred)
-
+                
+                # Create figure
                 fig, axes = plt.subplots(1, 3, figsize=(15, 5))
                 
-
-                if image.shape[0] == 4:
-
+                # Plot input image (adjust for RGGB visualization)
+                if image.shape[0] == 4:  # RGGB format
+                    # Simplified RGB conversion for visualization
+                    # R = image[0], G = (image[1] + image[2])/2, B = image[3]
                     rgb_image = torch.stack([
                         image[0],
                         (image[1] + image[2]) / 2,
                         image[3]
                     ], dim=0)
-
+                    
+                    # Normalize for display
                     rgb_min = rgb_image.min()
                     rgb_max = rgb_image.max()
                     rgb_image = (rgb_image - rgb_min) / (rgb_max - rgb_min)
-                    print("RGB image:", type(rgb_image), rgb_image.shape)
                     
                     axes[0].imshow(rgb_image.permute(1, 2, 0).numpy())
                 else:
-
+                    # Standard RGB/grayscale image
                     axes[0].imshow(image.permute(1, 2, 0).numpy())
                 axes[0].set_title("Input Image")
                 axes[0].axis('off')
                 
-
+                # Plot ground truth mask
                 target_vis = colormap[target].permute(2, 0, 1)
                 axes[1].imshow(target_vis.permute(1, 2, 0).numpy())
                 axes[1].set_title("Ground Truth")
                 axes[1].axis('off')
-
+                
+                # Plot prediction mask
                 pred_vis = colormap[pred].permute(2, 0, 1)
                 axes[2].imshow(pred_vis.permute(1, 2, 0).numpy())
                 axes[2].set_title("Prediction")
                 axes[2].axis('off')
                 
-
+                # Save figure
                 sample_idx = i*data_loader.batch_size + j
                 plt.tight_layout()
                 plt.savefig(os.path.join(vis_dir, f"segmentation_sample_{sample_idx}.png"))
                 plt.close(fig)
-
+                
+                # Also save a visualization of class distribution
                 plt.figure(figsize=(10, 5))
                 unique_target, counts_target = torch.unique(target, return_counts=True)
                 unique_pred, counts_pred = torch.unique(pred, return_counts=True)
@@ -142,46 +142,52 @@ def visualize_segmentation_predictions(model, data_loader, device, output_dir, n
                 plt.tight_layout()
                 plt.savefig(os.path.join(vis_dir, f"class_dist_sample_{sample_idx}.png"))
                 plt.close()
-                processed_samples += 1
-            if processed_samples >= num_samples:
-                break
-                
     
     print(f"Saved visualizations to {vis_dir}")
 
-class UpsampleBlock(nn.Module):
-    """Upsampling block for decoder"""
-    def __init__(self, in_channels, out_channels, scale_factor=2):
-        super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-        self.scale_factor = scale_factor
 
-    def forward(self, x):
-        x = F.interpolate(x, scale_factor=self.scale_factor, mode='bilinear', align_corners=False)
-        x = self.conv(x)
-        x = self.bn(x)
-        x = self.relu(x)
+class DINOv2SegmentationDecoder(nn.Module):
+    """Decoder module for segmentation using DINOv2 features"""
+    def __init__(self, dinov2_dim=768, hidden_dim=224, num_classes=21):
+        super().__init__()
+        
+        self.project = nn.Conv2d(dinov2_dim, hidden_dim, kernel_size=1)
+        
+ 
+        self.upsample1 = UpsampleBlock(hidden_dim, hidden_dim // 2)
+        self.upsample2 = UpsampleBlock(hidden_dim // 2, hidden_dim // 4)
+        self.upsample3 = UpsampleBlock(hidden_dim // 4, hidden_dim // 8)
+        
+
+        self.classifier = nn.Conv2d(hidden_dim // 8, num_classes, kernel_size=1)
+
+    def forward(self, features):
+
+        x = self.project(features)
+
+        x = self.upsample1(x)
+        x = self.upsample2(x)
+        x = self.upsample3(x)
+
+        x = F.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)  # Resize directly to 224x224
+        
+        x = self.classifier(x)
+        
         return x
 
 
-
 class DINOv2SegmentationModel(nn.Module):
-    def __init__(self, dinov2_model, num_classes=21, patch_size=14, img_size=224, input_format="rgb"):
+    """Full segmentation model with DINOv2 encoder and custom decoder"""
+    def __init__(self, dinov2_model, num_classes=21, patch_size=14, img_size=224):
         super().__init__()
         self.encoder = dinov2_model
+        
         self.dinov2_dim = dinov2_model.embed_dim
         self.patch_size = patch_size
         self.img_size = img_size
-        self.input_format = input_format
         
-
-        for name, param in self.encoder.named_parameters():
-            if "blocks.10" in name or "blocks.11" in name or "norm" in name:
-                param.requires_grad = True
-            else:
-                param.requires_grad = False
+        self.encoder.eval()
+        
 
         self.decoder = DINOv2SegmentationDecoder(
             dinov2_dim=self.dinov2_dim,
@@ -189,25 +195,94 @@ class DINOv2SegmentationModel(nn.Module):
             num_classes=num_classes
         )
 
-        if input_format == "rggb":
-            self.rggb_processor = RGGB2RGBModule(in_channels=4, out_channels=3)
-        else:
-            self.rggb_processor = None
+    def extract_features(self, x):
+        """Extract patch features from DINOv2 encoder"""
+
+        with torch.no_grad():
+
+            patch_tokens = self.encoder.get_intermediate_layers(x, n=1)[0][0]
+            
+            batch_size = x.shape[0]
+            num_tokens = patch_tokens.shape[0]
+            token_dim = patch_tokens.shape[1]
+
+            num_patches_per_image = num_tokens // batch_size
+            h = w = int(np.sqrt(num_patches_per_image))
+
+            assert h * w == num_patches_per_image, "Patch tokens can't form square grid."
+
+            patch_tokens = patch_tokens.reshape(batch_size, h, w, token_dim).permute(0, 3, 1, 2)
+
+        return patch_tokens
 
     def forward(self, x):
+        """Forward pass through encoder and decoder"""
 
-        if self.input_format == "rggb" and x.shape[1] == 4 and self.rggb_processor is not None:
-            x = self.rggb_processor(x)
+        features = self.extract_features(x)
+        
 
-        features = self.encoder(x, is_training=True)
-        patch_tokens = features["x_norm_patchtokens"]  # [B, N, C]
-        B, N, C = patch_tokens.shape
-        H = W = int(N ** 0.5)
-        patch_tokens = patch_tokens.transpose(1, 2).reshape(B, C, H, W)
- 
-        logits = self.decoder(patch_tokens)
+        logits = self.decoder(features)
         
         return logits
+
+    def prepare_for_distributed_training(self):
+        """Prepare model for distributed training using FSDP"""
+        logger.info("DISTRIBUTED FSDP -- preparing segmentation model for distributed training")
+        
+
+        device_id = distributed.get_local_rank()
+ 
+        fsdp_config = {
+            "sharding_strategy": self.cfg.compute_precision.student.backbone.sharding_strategy,
+            "mixed_precision": self.cfg.compute_precision.student.backbone.mixed_precision,
+            "device_id": device_id,
+            "sync_module_states": True,
+            "use_orig_params": True,
+        }
+        
+
+        self.decoder.project = FSDP(
+            self.decoder.project,
+            **fsdp_config
+        )
+        
+
+        self.decoder.upsample1 = FSDP(
+            self.decoder.upsample1,
+            **fsdp_config
+        )
+        
+        self.decoder.upsample2 = FSDP(
+            self.decoder.upsample2,
+            **fsdp_config
+        )
+        
+        self.decoder.upsample3 = FSDP(
+            self.decoder.upsample3,
+            **fsdp_config
+        )
+        
+
+        self.decoder.classifier = FSDP(
+            self.decoder.classifier,
+            **fsdp_config
+        )
+        
+        logger.info("FSDP wrapping of segmentation decoder completed")
+
+
+class SegmentationLoss(nn.Module):
+    """Combined loss function for segmentation"""
+    def __init__(self, weight=None):
+        super().__init__()
+        self.ce_loss = nn.CrossEntropyLoss(weight=weight, ignore_index=255)
+        self.dice_loss = DiceLoss(ignore_index=255)
+        
+    def forward(self, preds, targets):
+ 
+        ce = self.ce_loss(preds, targets)
+        dice = self.dice_loss(preds, targets)
+        return ce + dice
 
 
 class DiceLoss(nn.Module):
@@ -223,13 +298,15 @@ class DiceLoss(nn.Module):
             targets.clamp(0), num_classes=preds.shape[1]
         ).permute(0, 3, 1, 2).float()
         
+
         mask = (targets != self.ignore_index).float().unsqueeze(1)
+        
 
         preds_softmax = F.softmax(preds, dim=1)
 
         preds_softmax = preds_softmax * mask
         targets_one_hot = targets_one_hot * mask
-        
+
         intersection = torch.sum(preds_softmax * targets_one_hot, dim=(0, 2, 3))
         union = torch.sum(preds_softmax, dim=(0, 2, 3)) + torch.sum(targets_one_hot, dim=(0, 2, 3))
 
@@ -382,7 +459,7 @@ def get_args_parser(
         num_workers=8,
         lr=0.0001,
         weight_decay=0.0001,
-        num_classes=151,
+        num_classes=21,
         patch_size=14,
         img_size=224,
         eval_period_iterations=500,
@@ -395,114 +472,22 @@ def get_args_parser(
 from dinov2.data.datasets.pre_processor import RAWDataPreProcessor
 
 
+
 def make_segmentation_transform(split="train", img_size=224):
-    import albumentations as A
-    from albumentations.pytorch import ToTensorV2
+    """Create segmentation data transforms for RGGB data"""
+    from torchvision import transforms
     
     if split == "train":
-        return A.Compose([
-            A.Resize(img_size, img_size),
-            A.HorizontalFlip(p=0.5),
-            A.RandomRotate90(p=0.2),
-            ToTensorV2()
+        return transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+
+        ])
+    else:
+        return transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            
         ])
 
-    else:
-        return A.Compose([
-            A.Resize(img_size, img_size),
-            ToTensorV2()
-        ])
-
-
-
-def get_segmentation_optimizer_scheduler(model, max_iter):
-    encoder_params = list(model.encoder.parameters())
-    decoder_params = list(model.decoder.parameters())
-    
-    optimizer = torch.optim.AdamW([
-        {"params": encoder_params, "lr": 1e-6},
-        {"params": decoder_params, "lr": 1e-3}
-    ], weight_decay=0.01)
-
-    warmup_iters = max_iter // 10
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        max_lr=[1e-6, 1e-3],
-        total_steps=max_iter,
-        pct_start=0.1,
-        anneal_strategy='cos'
-    )
-    
-    return optimizer, scheduler
-
-import cv2
-import numpy as np
-
-def rggb_to_rgb(npy_path):
-    import cv2
-    array = np.load(npy_path)  
-
-    if array.dtype != np.uint8:
-        if array.max() > 1:
-            array = (array / array.max() * 255).astype(np.uint8)
-        else:
-            array = (array * 255).astype(np.uint8)
-
-    bayer_mosaic = pack_rggb_planes_to_bayer(array)
-    rgb = cv2.cvtColor(bayer_mosaic, cv2.COLOR_BAYER_RG2RGB)
-    
-    return rgb
-
-
-import numpy as np
-from PIL import Image
-
-def visualize_rggb_image(tensor, output_path="check_9.png"):
-    """
-    Properly visualize a raw image tensor with shape [H, W, 4] where the last dimension is RGGB
-    
-    Args:
-        tensor: Raw tensor with shape [H, W, 4]
-        output_path: Path to save the visualization
-    """
-
-    if isinstance(tensor, torch.Tensor):
-        if tensor.device.type != 'cpu':
-            tensor = tensor.cpu()
-        tensor_np = tensor.numpy()
-    else:
-        tensor_np = tensor
-
-    r = tensor_np[:, :, 0]
-    g1 = tensor_np[:, :, 1]
-    g2 = tensor_np[:, :, 2]
-    b = tensor_np[:, :, 3]
-
-    def robust_normalize(arr):
-        lower = np.percentile(arr, 2)
-        upper = np.percentile(arr, 98)
-        if upper == lower:
-            return np.zeros_like(arr)
-        arr_clipped = np.clip(arr, lower, upper)
-        return (arr_clipped - lower) / (upper - lower)
-
-    r_normalized = robust_normalize(r)
-    g1_normalized = robust_normalize(g1)
-    g2_normalized = robust_normalize(g2)
-    b_normalized = robust_normalize(b)
-
-    g = (g1_normalized + g2_normalized) / 2
-
-    rgb = np.stack([r_normalized, g, b_normalized], axis=2)
-    rgb_normalized = np.clip(rgb * 255, 0, 255).astype(np.uint8)
-    
-    Image.fromarray(rgb_normalized).save(output_path)
-    
-    return rgb_normalized
-
-
-
-import random
 
 def make_segmentation_dataset(dataset_str, transform=None, split="train"):
     """Create segmentation dataset from RGGB .npy images and RGB PNG masks"""
@@ -527,7 +512,6 @@ def make_segmentation_dataset(dataset_str, transform=None, split="train"):
             self.transform = transform
             self.target_transform = target_transform
             
-
             if split == "train":
                 self.images_dir = "/home/paperspace/Documents/nika_space/main_dataset/train/ade/images"
                 self.masks_dir = "/home/paperspace/Documents/nika_space/ADE20K/ADEChallengeData2016/annotations/training"
@@ -540,11 +524,10 @@ def make_segmentation_dataset(dataset_str, transform=None, split="train"):
                 os.path.join(self.images_dir, f) 
                 for f in os.listdir(self.images_dir) if f.endswith(".npy")
             ])
-
-
             self.mean = None
             self.std = None
             
+           
             self.preprocessor = RAWDataPreProcessor(
                 mean=self.mean, 
                 std=self.std, 
@@ -566,57 +549,69 @@ def make_segmentation_dataset(dataset_str, transform=None, split="train"):
             base_name = os.path.splitext(os.path.basename(img_path))[0]
             mask_path = os.path.join(self.masks_dir, base_name + ".png")
             
+            # Load RGGB .npy
             try:
                 try:
                     raw_data = np.load(img_path, allow_pickle=True)
                 except Exception:
-
+                    print("Img path", img_path)
                     if self.split == "train":
                         raw_data = np.load(f"/home/paperspace/Documents/nika_space/main_dataset/val/ade/images/{base_name}.npy", allow_pickle=True)
                     else:
                         raw_data = np.load(f"/home/paperspace/Documents/nika_space/main_dataset/train/ade/images/{base_name}.npy", allow_pickle=True)
                     
 
+                # Handle different types of .npy files
                 if isinstance(raw_data, dict):
                     raw_image = raw_data.get('image') or raw_data.get('raw') or next(iter(raw_data.values()))
                 else:
                     raw_image = raw_data
                 
+                # Ensure RGGB data is in the right format
                 raw_image = raw_image.astype(np.float32)
                 
-                if raw_image.ndim == 2: 
+                # Make sure we have the right dimensions [C, H, W]
+                if raw_image.ndim == 2:  # If it's a 2D array, add channel dimension
                     raw_image = raw_image[np.newaxis, ...]
                 elif raw_image.ndim == 3 and raw_image.shape[0] not in [1, 3, 4]:
+                    # If channels are not in first dimension, rearrange to [C, H, W]
                     raw_image = raw_image.transpose(2, 0, 1)
                 
+                # Convert to tensor
                 raw_tensor = torch.from_numpy(raw_image)
                 
+                # Preprocess
                 processed = self.preprocessor({'image': raw_tensor})['image']
-                mask = Image.open(mask_path).convert("L")
-                # [C, H, W]
-                height, width = processed.shape[-2], processed.shape[-1]
-                mask = mask.resize((width, height), Image.NEAREST)
-
-                mask = np.array(mask)
-                processed_np = processed.numpy()
-                if processed_np.ndim == 3 and processed_np.shape[0] in [1, 3, 4]:
-                    # from (C, H, W) to (H, W, C)
-                    processed_np = np.transpose(processed_np, (1, 2, 0))
-
-                mask_np = mask.numpy() if isinstance(mask, torch.Tensor) else mask
-
+                
+                # Apply additional transforms if provided
                 if self.transform:
-                    augmented = self.transform(image=processed_np, mask=mask_np)
-                    processed = augmented['image'].float()
-                    mask = augmented['mask'].long()
+                    processed = self.transform(processed)
+                
+                # Load mask
+                try:
+                    mask = Image.open(mask_path).convert("L")
+                except Exception:
+                    if self.split == "train":
+                        mask = Image.open(mask_path.replace("training", "validation")).convert("L")
+                    else:
+                        mask = Image.open(mask_path.replace("validation", "training")).convert("L")
 
-                visualization_image = visualize_rggb_image(processed.permute(1, 2, 0))
-                Image.fromarray(visualization_image).save("check_9.png")
-
+                if self.target_transform:
+                    mask = self.target_transform(mask)
+                else:
+                    mask = torch.from_numpy(np.array(mask)).long()
+                
                 return processed, mask
             
             except Exception as e:
-                raise e
+                logger.error(f"Error loading image or mask: {e}")
+                logger.error(f"Image path: {img_path}")
+                logger.error(f"Mask path: {mask_path}")
+                
+                # Return zeros as a fallback
+                dummy_image = torch.zeros((4, 224, 224), dtype=torch.float32)  # 4 channels for RGGB
+                dummy_mask = torch.zeros((224, 224), dtype=torch.long)
+                return dummy_image, dummy_mask
 
         def get_targets(self):
             class_set = set()
@@ -629,6 +624,8 @@ def make_segmentation_dataset(dataset_str, transform=None, split="train"):
                 except Exception as e:
                     logger.warning(f"Could not load mask for {mask_path}: {e}")
             return sorted(list(class_set))
+    
+        
 
 
     mean = params_dict.get("mean")
@@ -651,33 +648,13 @@ def make_segmentation_dataset(dataset_str, transform=None, split="train"):
         white_level=white_level
     )
 
-def pack_rggb_planes_to_bayer(raw_rggb_planes):
-    """
-    Takes a (4, H, W) array with RGGB planes and returns a (2H, 2W) Bayer mosaic image.
-    Assumes:
-      raw[0] = R
-      raw[1] = G1
-      raw[2] = G2
-      raw[3] = B
-    """
-    R, G1, G2, B = raw_rggb_planes
-    H, W = R.shape
-
-    bayer = np.zeros((H * 2, W * 2), dtype=R.dtype)
-
-    bayer[0::2, 0::2] = R     # Top-left
-    bayer[0::2, 1::2] = G1    # Top-right
-    bayer[1::2, 0::2] = G2    # Bottom-left
-    bayer[1::2, 1::2] = B     # Bottom-right
-
-    return bayer
 
 def collate_fn(batch):
     """Custom collate function that properly handles RGGB data and segmentation masks"""
     images, masks = zip(*batch)
     
-
     images = torch.stack(images)
+
     masks = torch.stack(masks)
     
     return images, masks
@@ -685,9 +662,8 @@ def collate_fn(batch):
 
 def compute_metrics(preds, targets, num_classes):
     """Compute segmentation metrics"""
-
     preds = preds.argmax(dim=1)
-    
+
     metrics = {
         "pixel_acc": 0.0,
         "mean_iou": 0.0,
@@ -697,7 +673,7 @@ def compute_metrics(preds, targets, num_classes):
     valid_pixels = (targets != 255)
     correct_pixels = ((preds == targets) & valid_pixels)
     metrics["pixel_acc"] = correct_pixels.sum().float() / valid_pixels.sum().float()
-
+ 
     ious = []
     for cls in range(num_classes):
         pred_cls = (preds == cls)
@@ -729,13 +705,12 @@ def evaluate_model(model, data_loader, device, num_classes):
         "class_iou": [0.0] * num_classes
     }
     num_samples = 0
-    processed = 0
-    print("before cycle: ", len(data_loader))
+    
     for images, targets in data_loader:
 
         images = images.to(device)
         targets = targets.to(device)
-        
+
         outputs = model(images)
 
         batch_metrics = compute_metrics(outputs, targets, num_classes)
@@ -746,9 +721,7 @@ def evaluate_model(model, data_loader, device, num_classes):
             metrics_sum["class_iou"][cls] += batch_metrics["class_iou"][cls] * images.size(0)
         
         num_samples += images.size(0)
-        if processed > 5:
-            break
-
+   
         visualize_segmentation_predictions(
             model=model,
             data_loader=data_loader,
@@ -756,36 +729,14 @@ def evaluate_model(model, data_loader, device, num_classes):
             output_dir=args.output_dir,
             num_samples=10
         )
-        processed += 10
 
     metrics = {
-        "pixel_acc": metrics_sum["pixel_acc"],
-        "mean_iou": metrics_sum["mean_iou"],
-        "class_iou": [iou for iou in metrics_sum["class_iou"]]
+        "pixel_acc": metrics_sum["pixel_acc"] / num_samples,
+        "mean_iou": metrics_sum["mean_iou"] / num_samples,
+        "class_iou": [iou / num_samples for iou in metrics_sum["class_iou"]]
     }
     
     return metrics
-
-
-class DynamicSegmentationLoss(nn.Module):
-    def __init__(self, class_weights=None, ignore_index=255, max_iter=1000):
-        super().__init__()
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.base_weights = class_weights # if class_weights else torch.ones(151)
-        self.base_weights = self.base_weights.to(device)
-        self.ignore_index = ignore_index
-        self.current_step = 0
-        self.max_steps = max_iter
-
-    def step(self):
-        self.current_step += 1
-
-    def forward(self, preds, targets):
-
-        decay = 1.0 - (self.current_step / self.max_steps)
-        weights = 1.0 + (self.base_weights - 1.0) * decay
-        ce_loss = nn.CrossEntropyLoss(weight=weights, ignore_index=self.ignore_index)
-        return ce_loss(preds, targets)
 
 
 def train_segmentation_model(
@@ -802,7 +753,6 @@ def train_segmentation_model(
     checkpoint_period,
     eval_period,
     start_iter=0,
-    max_grad_norm=1.0
 ):
     """Train segmentation model"""
     checkpointer = Checkpointer(model, output_dir, optimizer=optimizer, scheduler=scheduler)
@@ -812,7 +762,7 @@ def train_segmentation_model(
     header = "Training"
 
     model.train()
-    
+  
     iteration = start_iter
     logger.info(f"Starting training from iteration {start_iter} {max_iter}")
     
@@ -827,35 +777,36 @@ def train_segmentation_model(
         targets = targets.to(device)
 
         outputs = model(data)
-        outputs = outputs.to(device)
-        targets = targets.to(device)
 
-        loss_fn.step()
         loss = loss_fn(outputs, targets)
-        
-        
+  
         optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
-        
         optimizer.step()
         scheduler.step()
-        
+
         if iteration % 10 == 0:
             torch.cuda.synchronize()
             metric_logger.update(loss=loss.item())
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
+
         periodic_checkpointer.step(iteration)
         
         if eval_period > 0 and (iteration + 1) % eval_period == 0:
             metrics = evaluate_model(model, val_loader, device, num_classes)
             logger.info(f"ITER {iteration} - pixel_acc: {metrics['pixel_acc']:.4f}, mean_iou: {metrics['mean_iou']:.4f}")
-            
 
             if distributed.is_main_process():
                 metrics_file_path = os.path.join(output_dir, "segmentation_metrics.json")
-                
+                with open(metrics_file_path, "a") as f:
+                    f.write(json.dumps({
+                        "iteration": iteration,
+                        "pixel_acc": metrics["pixel_acc"].item(),
+                        "mean_iou": metrics["mean_iou"].item(),
+                        "class_iou": [iou.item() if isinstance(iou, torch.Tensor) else iou for iou in metrics["class_iou"]]
+                    }) + "\n")
+
 
             model.train()
         
@@ -863,11 +814,11 @@ def train_segmentation_model(
         
         if iteration >= max_iter:
             break
-
+ 
     metrics = evaluate_model(model, val_loader, device, num_classes)
     logger.info(f"FINAL - pixel_acc: {metrics['pixel_acc']:.4f}, mean_iou: {metrics['mean_iou']:.4f}")
     
-
+  
     if distributed.is_main_process():
         metrics_file_path = os.path.join(output_dir, "segmentation_metrics.json")
         with open(metrics_file_path, "a") as f:
@@ -880,153 +831,299 @@ def train_segmentation_model(
     
     return metrics
 
-class FocalLoss(nn.Module):
-    def __init__(self, gamma=2.0, alpha=0.25, ignore_index=255):
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+
+
+
+class AttentionBlock(nn.Module):
+    """Self-attention block for the decoder"""
+    def __init__(self, channels):
         super().__init__()
-        self.gamma = gamma
-        self.alpha = alpha
-        self.ignore_index = ignore_index
-        
-    def forward(self, inputs, targets):
-
-        logp = F.log_softmax(inputs, dim=1)
-        probs = torch.exp(logp)
-        
-        valid_mask = (targets != self.ignore_index).float()
-        
-        targets_one_hot = F.one_hot(
-            targets.clamp(0), num_classes=inputs.shape[1]
-        ).permute(0, 3, 1, 2).float()
-        
-
-        focal_weight = (1 - probs) ** self.gamma
-        loss = -self.alpha * focal_weight * logp
-        
-        loss = loss * targets_one_hot * valid_mask.unsqueeze(1)
-        
-        return loss.sum() / (valid_mask.sum() + 1e-10)
-
-
-
-def compute_class_weights(dataset, num_classes, min_weight=0.1, max_weight=5.0):
-    class_pixel_counts = torch.ones(num_classes)
-
-    for _, target in dataset:
-        target = target.numpy()
-        counts = np.bincount(target.flatten(), minlength=num_classes)
-        class_pixel_counts += counts
-
-    frequencies = class_pixel_counts / class_pixel_counts.sum()
-    median_freq = np.median(frequencies[frequencies > 0])
-    raw_weights = median_freq / (frequencies + 1e-6)
-
-
-    raw_weights = np.clip(raw_weights, min_weight, max_weight)
-
-    return torch.tensor(raw_weights, dtype=torch.float32)
-
-
-
-class RGGB2RGBModule(nn.Module):
-    """Module to convert RGGB features to RGB-like features for better compatibility with DINOv2"""
-    def __init__(self, in_channels=4, out_channels=3):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, out_channels, kernel_size=1)
-        )
+        self.query = nn.Conv2d(channels, channels // 8, kernel_size=1)
+        self.key = nn.Conv2d(channels, channels // 8, kernel_size=1)
+        self.value = nn.Conv2d(channels, channels, kernel_size=1)
+        self.gamma = nn.Parameter(torch.zeros(1))
         
     def forward(self, x):
-        return self.conv(x)
+        batch_size, C, H, W = x.size()
+
+        proj_query = self.query(x).view(batch_size, -1, H * W).permute(0, 2, 1)
+        proj_key = self.key(x).view(batch_size, -1, H * W)
+        energy = torch.bmm(proj_query, proj_key)
+        attention = F.softmax(energy, dim=2)
+        
+        proj_value = self.value(x).view(batch_size, -1, H * W)
+        out = torch.bmm(proj_value, attention.permute(0, 2, 1))
+        out = out.view(batch_size, C, H, W)
+        
+        out = self.gamma * out + x
+        return out
 
 
-
-class DINOv2SegmentationDecoder(nn.Module):
-    def __init__(self, dinov2_dim=768, hidden_dim=256, num_classes=150):
+class FeatureRefinementModule(nn.Module):
+    """Module to refine features from DINOv2"""
+    def __init__(self, in_channels, out_channels):
         super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        self.norm1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels)
+        )
+        self.relu = nn.ReLU(inplace=True)
+        self.attention = AttentionBlock(out_channels)
         
-        self.project = nn.Conv2d(dinov2_dim, hidden_dim, kernel_size=1)
-        
-        self.upsample1 = UpsampleBlock(hidden_dim, hidden_dim // 2)
-        self.upsample2 = UpsampleBlock(hidden_dim // 2, hidden_dim // 2)  # Keep more channels
-        self.upsample3 = UpsampleBlock(hidden_dim // 2, hidden_dim // 4)
-        
-        self.refine = nn.Sequential(
-            nn.Conv2d(hidden_dim // 4, hidden_dim // 4, kernel_size=3, padding=1),
-            nn.BatchNorm2d(hidden_dim // 4),
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.norm1(x)
+        identity = x
+        x = self.conv2(x)
+        x = x + identity
+        x = self.relu(x)
+        x = self.attention(x)
+        return x
+
+
+class UpsampleBlock(nn.Module):
+    """Enhanced upsampling block with residual connections"""
+    def __init__(self, in_channels, out_channels, scale_factor=2):
+        super().__init__()
+        self.upsample = nn.Upsample(scale_factor=scale_factor, mode='bilinear', align_corners=False)
+        self.conv_block = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
         
-        self.classifier = nn.Conv2d(hidden_dim // 4, num_classes, kernel_size=1)
-        nn.init.zeros_(self.classifier.bias)
+        self.skip = nn.Identity() if in_channels == out_channels else nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
-    
+    def forward(self, x, skip_features=None):
+        x = self.upsample(x)
+        
+        if skip_features is not None:
+            if x.shape[2:] != skip_features.shape[2:]:
+                skip_features = F.interpolate(skip_features, size=x.shape[2:], mode='bilinear', align_corners=False)
+            x = x + skip_features
+            
+        x = self.conv_block(x)
+        return x
+
+
+class ASPPModule(nn.Module):
+    """Atrous Spatial Pyramid Pooling"""
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        rates = [1, 6, 12, 18]
+        
+        self.aspp_blocks = nn.ModuleList()
+        for rate in rates:
+            self.aspp_blocks.append(
+                nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels, 3, padding=rate, dilation=rate, bias=False),
+                    nn.BatchNorm2d(out_channels),
+                    nn.ReLU(inplace=True)
+                )
+            )
+
+        self.global_avg_pool = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(in_channels, out_channels, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+        self.output_conv = nn.Sequential(
+            nn.Conv2d(out_channels * 5, out_channels, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        
+    def forward(self, x):
+
+        aspp_outputs = [block(x) for block in self.aspp_blocks]
+  
+        global_features = self.global_avg_pool(x)
+        global_features = F.interpolate(global_features, size=x.shape[2:], mode='bilinear', align_corners=False)
+
+        outputs = aspp_outputs + [global_features]
+        outputs = torch.cat(outputs, dim=1)
+        
+        outputs = self.output_conv(outputs)
+        return outputs
+
+
+class EnhancedDINOv2SegmentationDecoder(nn.Module):
+    """Enhanced decoder module for segmentation using DINOv2 features"""
+    def __init__(self, dinov2_dim=768, hidden_dim=256, num_classes=21):
+        super().__init__()
+        
+
+        self.feature_refine = FeatureRefinementModule(dinov2_dim, hidden_dim)
+        
+        self.aspp = ASPPModule(hidden_dim, hidden_dim)
+        
+
+        self.upsample1 = UpsampleBlock(hidden_dim, hidden_dim // 2)
+        self.upsample2 = UpsampleBlock(hidden_dim // 2, hidden_dim // 4)
+        self.upsample3 = UpsampleBlock(hidden_dim // 4, hidden_dim // 8)
+        self.upsample4 = UpsampleBlock(hidden_dim // 8, hidden_dim // 16)
+        
+        self.classifier = nn.Sequential(
+            nn.Conv2d(hidden_dim // 16, hidden_dim // 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(hidden_dim // 16),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden_dim // 16, num_classes, kernel_size=1)
+        )
+        
+        self.attention = AttentionBlock(hidden_dim // 16)
+
     def forward(self, features):
 
-        x = self.project(features)
+        x = self.feature_refine(features)
         
+
+        x = self.aspp(x)
 
         x = self.upsample1(x)
         x = self.upsample2(x)
         x = self.upsample3(x)
+        x = self.upsample4(x)
         
-        x = self.refine(x)
-
-        x = F.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)
+        x = self.attention(x)
+        
+        if x.size()[2:] != (224, 224):
+            x = F.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)
+        
         x = self.classifier(x)
         
         return x
 
 
-def setup_segmentation_model(dinov2_model, args, config=None, class_weights=None):
+class EnhancedDINOv2SegmentationModel(nn.Module):
+    """Enhanced segmentation model with DINOv2 encoder and advanced decoder"""
+    def __init__(self, dinov2_model, num_classes=21, patch_size=14, img_size=224):
+        super().__init__()
+        # self.rggb_processor = RGGB2RGBModule(in_channels=4, out_channels=3)
+        self.encoder = dinov2_model
+        
+ 
+        self.dinov2_dim = dinov2_model.embed_dim
+        self.patch_size = patch_size
+        self.img_size = img_size
+        self.encoder.eval()
+        
+
+        self.decoder = EnhancedDINOv2SegmentationDecoder(
+            dinov2_dim=self.dinov2_dim,
+            hidden_dim=384,  # Increased from 256
+            num_classes=num_classes
+        )
+
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        """Initialize the weights of the custom modules"""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def extract_intermediate_features(self, x):
+        """Extract hierarchical features from DINOv2 encoder"""
+        features = self.encoder.get_intermediate_layers(x, n=4)
+            
+        processed_features = []
+        batch_size = x.shape[0]
+            
+        for idx, feature in enumerate(features):
+            tokens = feature[0]
+            num_tokens = tokens.shape[0]
+            token_dim = tokens.shape[1]
+            
+            num_patches_per_image = num_tokens // batch_size
+            h = w = int(np.sqrt(num_patches_per_image))
+            
+            patch_tokens = tokens.reshape(batch_size, h, w, token_dim)
+            patch_tokens = patch_tokens.permute(0, 3, 1, 2)
+            processed_features.append(patch_tokens)
+            
+        main_features = processed_features[-1]
+
+        return main_features
+
+    def forward(self, x):
+        """Forward pass through encoder and decoder"""
+
+        features = self.extract_intermediate_features(x)
+        logits = self.decoder(features)
+        
+        return logits
+
+def setup_segmentation_model(dinov2_model, args, config=None):
     """Set up segmentation model, optimizer, and scheduler"""
-    model = DINOv2SegmentationModel(
+    print("Num classes: ", args.num_classes)
+    model = EnhancedDINOv2SegmentationModel(
         dinov2_model=dinov2_model,
         num_classes=args.num_classes,
         patch_size=args.patch_size,
         img_size=args.img_size
     )
+    
 
     if args.use_fsdp and config is not None:
         model.cfg = config
+    
 
     model = model.cuda()
-    
+
     if args.use_fsdp:
         model.prepare_for_distributed_training()
     
+
     if args.freeze_encoder:
         for param in model.encoder.parameters():
             param.requires_grad = False
     
+
     params = [p for p in model.parameters() if p.requires_grad]
-   
-    # max_iter = args.epochs * (args.train_dataset_size // args.batch_size)
-    max_iter = 50000
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, max_iter, eta_min=1e-6)
-    optimizer, scheduler = get_segmentation_optimizer_scheduler(model, max_iter)
+    optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay)
     
-    loss_fn = DynamicSegmentationLoss(class_weights=class_weights, max_iter=max_iter)
+
+    max_iter = args.epochs * (args.train_dataset_size // args.batch_size)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, max_iter, eta_min=1e-6)
+
+    loss_fn = SegmentationLoss()
     
     return model, optimizer, scheduler, loss_fn, max_iter
 
+
 def run_segmentation(args):
     """Main function to run segmentation"""
-    
+
     dinov2_model, config = setup_and_build_model(args)
+    
     mean = args.rggb_mean
     std = args.rggb_std
     
     args.train_dataset_str += f":mean={mean}:std={std}:black_level={args.black_level}:white_level={args.white_level}"
     args.val_dataset_str += f":mean={mean}:std={std}:black_level={args.black_level}:white_level={args.white_level}"
     
-    train_transform = make_segmentation_transform(split="train", img_size=args.img_size)
 
+    train_transform = make_segmentation_transform(split="train", img_size=args.img_size)
     val_transform = make_segmentation_transform(split="val", img_size=args.img_size)
     
     try:
@@ -1035,21 +1132,21 @@ def run_segmentation(args):
         
         logger.info(f"Creating validation dataset from: {args.val_dataset_str}")
         val_dataset = make_segmentation_dataset(args.val_dataset_str, val_transform, split="val")
-        print("Val dataset", len(val_dataset))
     except Exception as e:
         logger.error(f"Failed to create datasets: {e}")
         raise
     
+
     args.train_dataset_size = len(train_dataset)
     
-    args.num_classes = int(torch.max(torch.tensor(train_dataset.get_targets())).item()) + 1
+    args.num_classes = len(train_dataset.get_targets())
     print("Train dataset size: ", args.train_dataset_size, args.num_classes)
 
     train_loader = make_data_loader(
         dataset=train_dataset,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        shuffle=False,
+        shuffle=True,
         drop_last=True,
         persistent_workers=True if args.num_workers > 0 else False,
         collate_fn=collate_fn
@@ -1066,11 +1163,11 @@ def run_segmentation(args):
         collate_fn=collate_fn
     )
     
-    class_weights = compute_class_weights(train_dataset, args.num_classes)
-    model, optimizer, scheduler, loss_fn, max_iter = setup_segmentation_model(dinov2_model, args, config, class_weights)
-    
+
+    model, optimizer, scheduler, loss_fn, max_iter = setup_segmentation_model(dinov2_model, args, config)
+
     if distributed.is_enabled() and not args.use_fsdp:
-        model = DistributedDataParallel(model, find_unused_parameters=True)
+        model = DistributedDataParallel(model)
     
 
         checkpointer = Checkpointer(model, args.output_dir, optimizer=optimizer, scheduler=scheduler)
@@ -1099,7 +1196,7 @@ def run_segmentation(args):
         device=torch.cuda.current_device(),
         output_dir=args.output_dir,
         max_iter=max_iter,
-        checkpoint_period=5000,
+        checkpoint_period=args.save_checkpoint_frequency * (args.train_dataset_size // args.batch_size),
         eval_period=args.eval_period_iterations,
         start_iter=start_iter
     )
@@ -1110,6 +1207,7 @@ def run_segmentation(args):
 
 def main(args):
     """Main function"""
+
     try:
         if distributed.is_available() and not distributed.is_enabled():
             distributed.init()
@@ -1117,13 +1215,12 @@ def main(args):
         logger.warning(f"Failed to initialize distributed training: {e}")
         logger.warning("Falling back to single GPU training")
     
-
     torch.manual_seed(0)
     np.random.seed(0)
-    
+
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-    
+
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",

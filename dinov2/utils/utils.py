@@ -25,7 +25,7 @@ def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
         state_dict =torch.load(pretrained_weights, map_location="cpu", weights_only=False)
 
         # state_dict = torch.load(pretrained_weights, map_location="cpu")
-        state_dict = state_dict['model']
+        # state_dict = state_dict['model']
     if checkpoint_key is not None:
         print("INSIDE IF")
         logger.info(f"Take key {checkpoint_key} in provided checkpoint dict")

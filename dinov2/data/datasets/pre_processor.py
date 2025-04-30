@@ -184,8 +184,6 @@ class UniformDataset(Dataset):
         for subfolder in sorted(os.listdir(split_root)):  
             # if subfolder != "ade":
             #     continue
-            # if subfolder != "raise":
-            #     continue
             subfolder_path = os.path.join(split_root, subfolder)
             images_folder = os.path.join(subfolder_path, "images")
             
@@ -241,8 +239,12 @@ class UniformDataset(Dataset):
             visualization_image = visualization_image.cpu().detach().numpy()
             visualization_image = visualization_image.transpose(1, 2, 0)
             visualization_image = (visualization_image * 255).clip(0, 255).astype(np.uint8)
+            img = Image.fromarray(visualization_image)
+
+            # img = img.resize((301, 200), resample=Image.BILINEAR)
+
             img_save_path = os.path.join(save_dir, f"image_{i}.png")
-            Image.fromarray(visualization_image).save(img_save_path)
+            img.save(img_save_path)
 
         print(f"Saved {len(indices)} images to '{save_dir}'")
 

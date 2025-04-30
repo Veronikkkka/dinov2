@@ -107,9 +107,7 @@ def evaluate(
             metric_logger.update(loss=loss.item())
 
         # print(i_batch, batch)
-        if i_batch == batch:  # Change number of batches to save if needed
-            # for k, postprocessor in postprocessors.items():
-            # print(postprocessors.keys())
+        if i_batch == batch: 
             preds_logits = postprocessors["classifier_4_blocks_avgpool_True_lr_0_00003"](outputs, targets)["preds"]
             preds = preds_logits.argmax(dim=1)  # Ensure 'preds' is in your postprocessor output
             save_debug_images(
@@ -122,6 +120,7 @@ def evaluate(
 
         for k, metric in metrics.items():
             metric_inputs = postprocessors[k](outputs, targets)
+            # print("Targets : ", type(targets))
             metric.update(**metric_inputs)
         i_batch +=1
 

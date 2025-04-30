@@ -224,7 +224,7 @@ class LinearPostprocessor(nn.Module):
         preds = self.linear_classifier(samples)
         
         # Define the class mapping as a tensor
-        self.class_mapping = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        self.class_mapping = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
         
         # Check if targets are in range before remapping
         if torch.any(targets >= preds.size(1)):

@@ -14,7 +14,6 @@ from pathlib import Path
 from PIL import Image
 from torchvision import transforms
 
-# Implementation of your UniformDataset class (for completeness)
 class RAWDataPreProcessor:
     def __init__(self, mean=None, std=None, black_level=0, white_level=1.0):
         self.mean = mean
@@ -472,20 +471,13 @@ def analyze_clusters(features, cluster_labels, label_map, output_dir):
 
 def main():
     args = parse_args()
-    
-    # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Log the configuration
+
     with open(os.path.join(args.output_dir, 'config.json'), 'w') as f:
         json.dump(vars(args), f, indent=2)
     
-    # Load model
-    print(f"Loading encoder from {args.checkpoint}")
     model = load_encoder(args.checkpoint, args.device)
     
-    # Load dataset
-    print(f"Loading dataset from {args.dataset_root}")
     dataloader, label_map = load_dataset(
         args.dataset_root, 
         args.batch_size,
@@ -496,22 +488,16 @@ def main():
         white_level=args.white_level
     )
     
-    # Save label mapping
     with open(os.path.join(args.output_dir, 'label_map.json'), 'w') as f:
-        # Convert numeric keys to strings for JSON
         serializable_map = {str(k): int(v) for k, v in label_map.items()}
         json.dump(serializable_map, f, indent=2)
     
-    # Extract features
-    print("Extracting features...")
     features, labels = extract_features(model, dataloader, args.device)
     
-    # Save features
     print(f"Saving features to {args.output_dir}")
     np.save(os.path.join(args.output_dir, 'features.npy'), features)
     np.save(os.path.join(args.output_dir, 'labels.npy'), labels)
     
-    # Evaluate with KNN if we have labels
     if len(np.unique(labels)) > 1 and np.sum(labels != -1) > 0:
         print(f"Evaluating with KNN (k={args.n_neighbors})...")
         knn_results = evaluate_knn(features, labels, args.n_neighbors)
@@ -519,9 +505,8 @@ def main():
         if knn_results['accuracy'] is not None:
             print(f"KNN Accuracy: {knn_results['accuracy']:.4f}")
             
-            # Save KNN results
+
             with open(os.path.join(args.output_dir, 'knn_results.json'), 'w') as f:
-                # Convert numpy types to Python native types for JSON serialization
                 results_json = {
                     'accuracy': float(knn_results['accuracy']),
                     'classification_report': {
@@ -533,16 +518,13 @@ def main():
                 }
                 json.dump(results_json, f, indent=2)
             
-            # Save KNN model
             with open(os.path.join(args.output_dir, 'knn_model.pkl'), 'wb') as f:
                 pickle.dump(knn_results['knn_model'], f)
     
-    # Perform clustering
     print(f"Performing KMeans clustering (k={args.n_clusters})...")
     clustering_results = perform_clustering(features, args.n_clusters, 
                                           os.path.join(args.output_dir, 'clusters'))
     
-    # Analyze clusters
     if len(label_map) > 0:
         print("Analyzing cluster composition...")
         label_distribution = analyze_clusters(
@@ -554,53 +536,53 @@ def main():
     
     print(f"Clustering complete. Results saved to {args.output_dir}")
     
-    # Save summary info in a README
+
     summary = f"""
-# Encoder Validation Results
+    # Encoder Validation Results
 
-## Configuration
-- Checkpoint: {args.checkpoint}
-- Dataset: {args.dataset_root}
-- Number of samples: {len(features)}
-- Feature dimension: {features.shape[1]}
-- KNN neighbors: {args.n_neighbors}
-- Number of clusters: {args.n_clusters}
+    ## Configuration
+    - Checkpoint: {args.checkpoint}
+    - Dataset: {args.dataset_root}
+    - Number of samples: {len(features)}
+    - Feature dimension: {features.shape[1]}
+    - KNN neighbors: {args.n_neighbors}
+    - Number of clusters: {args.n_clusters}
 
-## Results Summary
-"""
+    ## Results Summary
+    """
     
     if 'knn_results' in locals() and knn_results['accuracy'] is not None:
         summary += f"""
-### KNN Classification
-- Accuracy: {knn_results['accuracy']:.4f}
-- See knn_results.json for detailed metrics
-"""
+        ### KNN Classification
+        - Accuracy: {knn_results['accuracy']:.4f}
+        - See knn_results.json for detailed metrics
+        """
     
     summary += f"""
-### Clustering
-- Number of clusters: {args.n_clusters}
-- Inertia: {clustering_results['stats']['inertia']:.2f}
-"""
+        ### Clustering
+        - Number of clusters: {args.n_clusters}
+        - Inertia: {clustering_results['stats']['inertia']:.2f}
+        """
     
     if clustering_results['stats']['silhouette_score'] is not None:
         summary += f"- Silhouette score: {clustering_results['stats']['silhouette_score']:.4f}\n"
     
     summary += """
-## Files
-- features.npy: Extracted features
-- labels.npy: Original labels
-- label_map.json: Mapping between text labels and numeric indices
-- knn_results.json: KNN classification results (if applicable)
-- knn_model.pkl: Trained KNN model (if applicable)
-- clusters/: Clustering results directory
-  - cluster_centers.npy: Cluster centers
-  - cluster_labels.npy: Cluster assignments
-  - cluster_stats.json: Clustering statistics
-  - cluster_analysis.json: Analysis of label distribution in clusters
-  - kmeans_model.pkl: Trained KMeans model
-  - cluster_visualization.png: PCA visualization of clusters
-  - tsne_visualization.png: t-SNE visualization (if available)
-"""
+    ## Files
+    - features.npy: Extracted features
+    - labels.npy: Original labels
+    - label_map.json: Mapping between text labels and numeric indices
+    - knn_results.json: KNN classification results (if applicable)
+    - knn_model.pkl: Trained KNN model (if applicable)
+    - clusters/: Clustering results directory
+    - cluster_centers.npy: Cluster centers
+    - cluster_labels.npy: Cluster assignments
+    - cluster_stats.json: Clustering statistics
+    - cluster_analysis.json: Analysis of label distribution in clusters
+    - kmeans_model.pkl: Trained KMeans model
+    - cluster_visualization.png: PCA visualization of clusters
+    - tsne_visualization.png: t-SNE visualization (if available)
+    """
     
     with open(os.path.join(args.output_dir, 'README.md'), 'w') as f:
         f.write(summary)

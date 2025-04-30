@@ -12,13 +12,8 @@ def downsample_raw(raw):
     Output is a [H/4, W/4, 4] tensor, preserving the RGGB pattern.
     """
 
-    # Ensure the image is in [B, C, H, W] format for PyTorch operations
     raw_image_4channel = torch.tensor(raw).unsqueeze(0).permute(0, 3, 1, 2)
-    
-    # Apply average pooling over a 2x2 window for each channel
     downsampled_image = F.avg_pool2d(raw_image_4channel, kernel_size=2, stride=2, padding=0)
-    
-    # Rearrange back to [H/4, W/4, 4] format
     downsampled_image = downsampled_image.squeeze(0).permute(1, 2, 0)
     
     return downsampled_image

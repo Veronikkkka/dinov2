@@ -40,19 +40,17 @@ class UniformDataset(Dataset):
                     for line in f:
                         parts = line.strip().split(" ")
                         if len(parts) < 2:
-                            continue  # Skip malformed lines
+                            continue
 
                         filename, *label_text = parts
                         label_text = " ".join(label_text)
 
-                        # Assign numeric label
                         if label_text not in self.label_map:
                             self.label_map[label_text] = label_idx
                             label_idx += 1
 
                         label_dict[filename] = self.label_map[label_text]
 
-            # Collect image paths and labels
             for img_name in sorted(os.listdir(images_folder)):
                 img_path = os.path.join(images_folder, img_name)
                 label = label_dict.get(img_name, -1)  # -1 if no label
@@ -65,13 +63,12 @@ class UniformDataset(Dataset):
     def __getitem__(self, idx):
         img_path, label = self.data[idx]
 
-        # Load image
+
         # image = Image.open(img_path).convert("RGB")
         print("Img path: ", img_path)
         image = np.load(img_path)
         image = torch.from_numpy(image).float()
 
-        # Apply transforms
         if self.transform:
             image = self.transform(image)
 

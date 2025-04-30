@@ -39,13 +39,11 @@ class ADK20Dataset(Dataset):
         if not self.image_paths:
             raise ValueError(f"No images found in dataset directory: {root}")
 
-        # Load annotations
         self.labels = {}
         self.class_to_idx = {}
         self.idx_to_class = {}
         self._load_annotations(annotations_file)
         
-        # Filter image paths to only include those with annotations
         self.image_paths = [p for p in self.image_paths if self._get_image_id(p) in self.labels]
         
         if shuffle:
@@ -72,13 +70,11 @@ class ADK20Dataset(Dataset):
                     image_id = parts[0]
                     class_name = parts[1]
                     
-                    # Add class to mapping if not already present
                     if class_name not in self.class_to_idx:
                         idx = len(self.class_to_idx)
                         self.class_to_idx[class_name] = idx
                         self.idx_to_class[idx] = class_name
                     
-                    # Store label for this image
                     self.labels[image_id] = self.class_to_idx[class_name]
             
             print(f"Loaded {len(self.labels)} annotations with {len(self.class_to_idx)} unique classes")

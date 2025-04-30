@@ -4,19 +4,17 @@ import torch
 from tqdm import tqdm
 from dinov2.data.datasets.pre_processor import RAWDataPreProcessor  # Adjust import path
 
-# ==== CONFIG ====
 INPUT_DIR = "/home/paperspace/Documents/nika_space/main_dataset/raise/images"
 OUTPUT_DIR = "/home/paperspace/Documents/nika_space/main_dataset/raise_preprocessed/images"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 preprocessor = RAWDataPreProcessor(
-    mean=None,   # example: replace with your actual values
+    mean=None,
     std=None,
     black_level=0,
     white_level=16383
 )
 
-# ==== Processing Loop ====
 for root, dirs, files in os.walk(INPUT_DIR):
     for fname in tqdm(files):
         if not fname.endswith(".npy"):
@@ -25,13 +23,11 @@ for root, dirs, files in os.walk(INPUT_DIR):
         input_path = os.path.join(root, fname)
         output_path = os.path.join(OUTPUT_DIR, fname)
 
-        # Skip already-processed files
         if os.path.exists(output_path):
             continue
 
         raw_data = np.load(input_path, allow_pickle=True)
 
-        # Convert to tensor
         if isinstance(raw_data, dict):
             if 'image' in raw_data:
                 raw_tensor = torch.from_numpy(raw_data['image']).float()
@@ -44,9 +40,8 @@ for root, dirs, files in os.walk(INPUT_DIR):
         else:
             continue
 
-        # Normalize
         processed_tensor = preprocessor.process_tensor(raw_tensor)
 
-        # Convert back to numpy and save
+ 
         processed_array = processed_tensor.numpy()
         np.save(output_path, processed_array)

@@ -12,6 +12,9 @@ from torch.utils.data import Sampler
 
 from .datasets import ImageNet, ImageNet22k
 from .samplers import EpochSampler, InfiniteSampler, ShardedInfiniteSampler
+from .datasets import (
+    ADK20Dataset, RAWNODDataset, RaiseDataset, NPZDataset, UniformDataset, ObjDetDataset
+)
 
 
 logger = logging.getLogger("dinov2")
@@ -49,15 +52,25 @@ def _parse_dataset_str(dataset_str: str):
 
     for token in tokens[1:]:
         key, value = token.split("=")
-        assert key in ("root", "extra", "split")
+        assert key in ("root", "extra", "split", "shuffle")
+        if key == "shuffle":
+            value = bool(int(value))
         kwargs[key] = value
 
+    # if name == "HemaStandardDataset":
+    #     class_ = HemaStandardDataset
     if name == "ImageNet":
-        class_ = ImageNet
-        if "split" in kwargs:
-            kwargs["split"] = ImageNet.Split[kwargs["split"]]
-    elif name == "ImageNet22k":
-        class_ = ImageNet22k
+        class_ = ADK20Dataset
+    elif name == "RAW_NOD":
+        class_ = RAWNODDataset
+    elif name == "RAISE":
+        class_ = RaiseDataset
+    elif name == "NPZ":
+        class_ = NPZDataset
+    elif name == "Main":
+        class_ = UniformDataset
+    elif name == "Obj":
+        class_ = ObjDetDataset
     else:
         raise ValueError(f'Unsupported dataset "{name}"')
 

@@ -44,6 +44,38 @@ class ModelWithIntermediateLayers(nn.Module):
         return features
 
 
+from torchvision.utils import save_image
+import torchvision.transforms.functional as TF
+import os
+from PIL import Image, ImageDraw, ImageFont
+
+def save_debug_images(inputs, preds, save_dir, class_mapping=None, count=5, prefix="batch"):
+    os.makedirs(save_dir, exist_ok=True)
+    inputs = inputs[:count].cpu()
+    preds = preds[:count].cpu()
+
+    # Unnormalization values for ImageNet
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+    for i in range(len(inputs)):
+        img = inputs[i]
+
+        if img.shape[0] == 1 or img.shape[0] == 4:
+            img = img[0:3]
+
+        # Unnormalize
+        # img = img * std + mean
+        # img = torch.clamp(img, 0, 1)
+
+        # Convert to PIL and draw
+        img = TF.to_pil_image(img)
+        draw = ImageDraw.Draw(img)
+        label_text = f"{class_mapping[preds[i].item()]}" if class_mapping is not None else str(preds[i].item())
+        draw.text((5, 5), label_text, fill="red")
+
+        img.save(os.path.join(save_dir, f"{prefix}_{i}.png"))
+
 @torch.inference_mode()
 def evaluate(
     model: nn.Module,
@@ -62,7 +94,10 @@ def evaluate(
 
     metric_logger = MetricLogger(delimiter="  ")
     header = "Test:"
-
+    import random
+    batch = random.randint(0, 10)
+    print(batch)
+    i_batch = 0
     for samples, targets, *_ in metric_logger.log_every(data_loader, 10, header):
         outputs = model(samples.to(device))
         targets = targets.to(device)
@@ -71,9 +106,23 @@ def evaluate(
             loss = criterion(outputs, targets)
             metric_logger.update(loss=loss.item())
 
+        # print(i_batch, batch)
+        if i_batch == batch: 
+            preds_logits = postprocessors["classifier_4_blocks_avgpool_True_lr_0_00003"](outputs, targets)["preds"]
+            preds = preds_logits.argmax(dim=1)  # Ensure 'preds' is in your postprocessor output
+            save_debug_images(
+                samples, preds,
+                save_dir="debug_outputs_linear",  # Customize this path
+                class_mapping=None,             # Pass actual class_mapping if available
+                prefix=f"batch{i_batch}"
+            )
+
+
         for k, metric in metrics.items():
             metric_inputs = postprocessors[k](outputs, targets)
+            # print("Targets : ", type(targets))
             metric.update(**metric_inputs)
+        i_batch +=1
 
     metric_logger.synchronize_between_processes()
     logger.info(f"Averaged stats: {metric_logger}")

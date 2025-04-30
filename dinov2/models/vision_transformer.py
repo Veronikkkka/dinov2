@@ -16,8 +16,10 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 from torch.nn.init import trunc_normal_
-
+import torch.nn.functional as F
 from dinov2.layers import Mlp, PatchEmbed, SwiGLUFFNFused, MemEffAttention, NestedTensorBlock as Block
+from dinov2.models.help import Merge_block, Model_level_Adapeter
+from dinov2.models.input_level_adapter  import Input_level_Adapeter
 
 
 logger = logging.getLogger("dinov2")
@@ -65,6 +67,19 @@ class DinoVisionTransformer(nn.Module):
         num_register_tokens=0,
         interpolate_antialias=False,
         interpolate_offset=0.1,
+        # RAW adapter parameters
+        w_lut=True,
+        light_mode='normal',
+        lut_dim=32,
+        k_size=3,
+        merge_ratio=1.0,
+        model_adapter_path='/home/paperspace/Documents/nika_space/dinov2/extracted_model_adapter_weights.pth',
+        input_level_adapter_path='/home/paperspace/Documents/nika_space/dinov2/extracted_pre_encoder_weights.pth',
+        fea_c_s = [384, 768, 1920],
+        ada_c_s = [16, 32, 64],
+        mid_c_s = [384, 576, 768],
+        merge_block_indexes=[],
+        is_teacher=False,
     ):
         """
         Args:
@@ -103,7 +118,15 @@ class DinoVisionTransformer(nn.Module):
         self.interpolate_antialias = interpolate_antialias
         self.interpolate_offset = interpolate_offset
 
+        # RAW adapter configuration
+        self.w_lut = w_lut
+        self.light_mode = light_mode
+        self.lut_dim = lut_dim
+        self.k_size = k_size
+        self.merge_ratio = merge_ratio
+
         self.patch_embed = embed_layer(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+        self.patch_embed_for_model_adapter = embed_layer(img_size=56, patch_size=4, in_chans=16, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -166,15 +189,115 @@ class DinoVisionTransformer(nn.Module):
         self.head = nn.Identity()
 
         self.mask_token = nn.Parameter(torch.zeros(1, embed_dim))
+        
+        # Initialize RAW adapter
+        # self.channel_reduction = nn.Conv2d(4, 3, kernel_size=1)
+        self.merge_block_indexes = merge_block_indexes
+        # self.merge_block_indexes = [0, 2, 4, 6, 8, 10]  
+        self.merge_block_indexes = [0, 6, 10]      
+        print("Before if:")
+        if self.w_lut:
+            self.pre_encoder = Input_level_Adapeter(mode=light_mode, lut_dim=lut_dim, k_size=k_size, w_lut=w_lut)
+            for param in self.pre_encoder.parameters():
+                param.requires_grad_(True)            
+
+            # self.model_adapter = Model_level_Adapeter(in_c=in_chans, w_lut=w_lut)
+            self.model_adapter = Model_level_Adapeter(in_c=4, in_dim=ada_c_s[0], w_lut=self.w_lut)
+            # if model_adapter_path is not None:
+            #     print("Loading model adapter:", model_adapter_path)
+            #     adapter_state = torch.load(model_adapter_path, map_location="cpu")
+            #     self.model_adapter.load_state_dict(adapter_state, strict=False)
+            # if input_level_adapter_path is not None:
+            #     print("Loading input-level adapter:", input_level_adapter_path)
+            #     adapter_state = torch.load(input_level_adapter_path, map_location="cpu")
+            #     self.pre_encoder.load_state_dict(adapter_state)
+
+            self.merge_blocks = nn.ModuleList()
+            
+            # Loop through the merge_blocks_indexes and create Merge_block instances
+            for i, idx in enumerate(self.merge_block_indexes):
+                return_ada = False if i == len(self.merge_block_indexes) - 1 else True  # Only the last block gets return_ada=False
+                if i != 0 or i != len(self.merge_block_indexes) - 1:
+                    k = 1
+                else:
+                    k = i
+                merge_block = Merge_block(
+                    fea_c=fea_c_s[k], 
+                    ada_c=ada_c_s[k], 
+                    mid_c=mid_c_s[k], 
+                    return_ada=return_ada
+                ).to("cuda")
+
+                # merge_block_state = torch.load("/home/paperspace/Documents/nika_space/ECCV_RAW_Adapter/mmsegmentation_github/extracted_merged_blocks_weights_2.pth", map_location="cpu")
+                # merge_block.load_state_dict(merge_block_state)
+                # if is_teacher:
+                #     for param in merge_block.parameters():
+                #         param.requires_grad = False
+
+                self.merge_blocks.append(merge_block)    
+            # self.merge_blocks.to("cuda")
+            print("MERGED BLOCKS:", self.merge_block_indexes)
+
+
+        # # Freeze the patch embedding
+        # for param in self.patch_embed.parameters():
+        #     param.requires_grad_(False)
+
+        # # Freeze the position embedding
+        # if hasattr(self, 'pos_embed') and self.pos_embed is not None:
+        #     self.pos_embed.requires_grad_(False)
+
+        # # Freeze the cls token if it exists
+        # if hasattr(self, 'cls_token') and self.cls_token is not None:
+        #     self.cls_token.requires_grad_(False)
+
+        # # Freeze the transformer blocks
+        # for block in self.blocks:
+        #     for param in block.parameters():
+        #         param.requires_grad_(False)
+
+        # # Freeze the norm layer if it exists
+        # if hasattr(self, 'norm') and self.norm is not None:
+        #     for param in self.norm.parameters():
+        #         param.requires_grad_(False)
+
+        # # Freeze any head/projection layers
+        # if hasattr(self, 'head') and self.head is not None:
+        #     for param in self.head.parameters():
+        #         param.requires_grad_(False)
 
         self.init_weights()
+        # self.freeze_dino_weights()
+
+
+    def freeze_dino_weights(self):
+        """Freeze all original DINO weights and keep only the adapter trainable."""
+        for name, param in self.named_parameters():
+            # Unfreeze only pre_encoder, model_adapter, and merge_blocks
+            if not any(sub in name for sub in ["pre_encoder", "model_adapter", "merge_blocks"]):
+                param.requires_grad = False
+            else:
+                param.requires_grad = True  # Ensure adapters are trainable
 
     def init_weights(self):
-        trunc_normal_(self.pos_embed, std=0.02)
+        trunc_normal_(self.pos_embed, std=0.02)        
         nn.init.normal_(self.cls_token, std=1e-6)
         if self.register_tokens is not None:
             nn.init.normal_(self.register_tokens, std=1e-6)
         named_apply(init_weights_vit_timm, self)
+        
+        if hasattr(self, "pre_encoder"):
+            print("Init weights for pre-encoder")
+            self.pre_encoder.apply(init_weights_vit_timm)
+
+        if hasattr(self, "model_adapter"):
+            print("Init weights for model adapter")
+            self.model_adapter.apply(init_weights_vit_timm)
+
+        if hasattr(self, "merge_blocks"):
+            print("Init weights for merge blocks")
+            for block in self.merge_blocks:
+                block.apply(init_weights_vit_timm)
 
     def interpolate_pos_encoding(self, x, w, h):
         previous_dtype = x.dtype
@@ -212,11 +335,35 @@ class DinoVisionTransformer(nn.Module):
 
     def prepare_tokens_with_masks(self, x, masks=None):
         B, nc, w, h = x.shape
+
+        if self.w_lut:  # I1, I2, I3, I4
+            x_raw = self.pre_encoder(x)
+        if self.w_lut:  # I1, I2, I3, I4
+            ada = self.model_adapter([x_raw[0], x_raw[1], x_raw[2], x_raw[3]])
+        else:  # I1, I2, I3
+            ada = self.model_adapter([x_raw[0], x_raw[1], x_raw[2]])
+
+        x = x_raw[-1]
+        # print("X before patch embedding ",ada.shape, x.shape )
         x = self.patch_embed(x)
+        if x.shape[1] == 256:
+            ada = F.interpolate(ada, size=(64, 64), mode='bilinear', align_corners=False)
+        elif x.shape[1] == 49:
+            ada = F.interpolate(ada, size=(28, 28), mode='bilinear', align_corners=False)
+        # print("ada.shape ", ada.shape, x.shape)
+        ada = self.patch_embed_for_model_adapter(ada)
+        # tensor2_reshaped = ada.transpose(1, 2)  # [32, 768, 196]
+        # print("ada.shape after embedding ", ada.shape, x.shape)
+
         if masks is not None:
             x = torch.where(masks.unsqueeze(-1), self.mask_token.to(x.dtype).unsqueeze(0), x)
+            ada = torch.where(masks.unsqueeze(-1), self.mask_token.to(ada.dtype).unsqueeze(0), ada)
 
         x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
+        ada = torch.cat((self.cls_token.expand(ada.shape[0], -1, -1), ada), dim=1)
+        # print("pos_embed shape11:", self.pos_embed.shape)
+        ada = ada + self.interpolate_pos_encoding(ada, w, h)
+
         x = x + self.interpolate_pos_encoding(x, w, h)
 
         if self.register_tokens is not None:
@@ -228,13 +375,35 @@ class DinoVisionTransformer(nn.Module):
                 ),
                 dim=1,
             )
+            # print("x.shape",x.shape)
 
-        return x
+        # return x
+        return x, ada
+        # return x, None
 
     def forward_features_list(self, x_list, masks_list):
-        x = [self.prepare_tokens_with_masks(x, masks) for x, masks in zip(x_list, masks_list)]
-        for blk in self.blocks:
+        # x = [self.prepare_tokens_with_masks(x, masks) for x, masks in zip(x_list, masks_list)]
+        x_s = []
+        ada_list = []
+
+        for x, masks in zip(x_list, masks_list):
+            x_, ada = self.prepare_tokens_with_masks(x, masks)
+            x_s.append(x_)
+            ada_list.append(ada)
+        
+
+        x = x_s
+        # print("ind: ", self.merge_blocks_indexes)
+        indx = 0
+        for i, blk in enumerate(self.blocks):
             x = blk(x)
+            
+            
+            if self.w_lut and ada is not None and i in self.merge_block_indexes:
+                # print("ERROR!")
+                x_ada_pairs = [self.merge_blocks[indx](x_i, ada_i, ratio=self.merge_ratio) for x_i, ada_i in zip(x, ada_list)]
+                x, ada_list = map(list, zip(*x_ada_pairs)) 
+                indx += 1
 
         all_x = x
         output = []
@@ -255,10 +424,17 @@ class DinoVisionTransformer(nn.Module):
         if isinstance(x, list):
             return self.forward_features_list(x, masks)
 
-        x = self.prepare_tokens_with_masks(x, masks)
-
-        for blk in self.blocks:
+        x, ada = self.prepare_tokens_with_masks(x, masks)
+        # x = self.prepare_tokens_with_masks(x, masks)
+        indx = 0
+        for i, blk in enumerate(self.blocks):
+            # print("X type: ", x.dtype)
             x = blk(x)
+            if self.w_lut and ada is not None and i in self.merge_block_indexes:
+                # print("HERE 11", x.shape, ada.shape)
+                # print("ERROR!")
+                x, ada  = self.merge_blocks[indx](x, ada, ratio=self.merge_ratio)
+                indx += 1
 
         x_norm = self.norm(x)
         return {
@@ -270,7 +446,10 @@ class DinoVisionTransformer(nn.Module):
         }
 
     def _get_intermediate_layers_not_chunked(self, x, n=1):
-        x = self.prepare_tokens_with_masks(x)
+        # if x.shape != torch.Size([16, 4, 224, 224]):
+        #     print(x.shape)
+        x, ada = self.prepare_tokens_with_masks(x)
+        # x = self.prepare_tokens_with_masks(x)
         # If n is an int, take the n last blocks. If it's a list, take them
         output, total_block_len = [], len(self.blocks)
         blocks_to_take = range(total_block_len - n, total_block_len) if isinstance(n, int) else n
@@ -282,7 +461,8 @@ class DinoVisionTransformer(nn.Module):
         return output
 
     def _get_intermediate_layers_chunked(self, x, n=1):
-        x = self.prepare_tokens_with_masks(x)
+        x, ada = self.prepare_tokens_with_masks(x)
+        # x = self.prepare_tokens_with_masks(x)
         output, i, total_block_len = [], 0, len(self.blocks[-1])
         # If n is an int, take the n last blocks. If it's a list, take them
         blocks_to_take = range(total_block_len - n, total_block_len) if isinstance(n, int) else n
@@ -311,6 +491,8 @@ class DinoVisionTransformer(nn.Module):
             outputs = [self.norm(out) for out in outputs]
         class_tokens = [out[:, 0] for out in outputs]
         outputs = [out[:, 1 + self.num_register_tokens :] for out in outputs]
+        # if outputs[0].shape != torch.Size([16, 256, 768]):
+        #     print("ouputs: ", len(outputs), outputs[0].shape)
         if reshape:
             B, _, w, h = x.shape
             outputs = [
@@ -322,7 +504,9 @@ class DinoVisionTransformer(nn.Module):
         return tuple(outputs)
 
     def forward(self, *args, is_training=False, **kwargs):
+        # print("pos_embed shape _ 0:", self.pos_embed.shape)
         ret = self.forward_features(*args, **kwargs)
+        # print("ret: ", ret.keys(), type(ret))
         if is_training:
             return ret
         else:
